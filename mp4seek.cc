@@ -1,7 +1,70 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <string>
+
+#include "Ap4.h"
+
+// Parsed MP4 file info
+struct Mp4Info {
+  std::unique_ptr<AP4_File> file;
+  AP4_Movie* movie;
+  AP4_Track* video_track;
+  AP4_UI32 video_duration_ms;
+  AP4_UI32 video_timescale;
+};
+
+// Parse MP4 file and extract video track info
+// Returns 0 on success, non-zero on error
+int parse_mp4_file(const std::string& infile, int debug_level, Mp4Info& info) {
+  AP4_ByteStream* input = nullptr;
+  AP4_Result result = AP4_FileByteStream::Create(
+      infile.c_str(), AP4_FileByteStream::STREAM_MODE_READ, input);
+  if (AP4_FAILED(result)) {
+    std::cerr << "Error: cannot open input file: " << infile << "\n";
+    return 1;
+  }
+
+  info.file = std::make_unique<AP4_File>(*input, true);
+  input->Release();
+
+  info.movie = info.file->GetMovie();
+  if (info.movie == nullptr) {
+    std::cerr << "Error: no movie found in file\n";
+    return 1;
+  }
+
+  // Find the video track
+  info.video_track = nullptr;
+  AP4_List<AP4_Track>& tracks = info.movie->GetTracks();
+  for (AP4_List<AP4_Track>::Item* item = tracks.FirstItem(); item != nullptr;
+       item = item->GetNext()) {
+    AP4_Track* track = item->GetData();
+    if (track->GetType() == AP4_Track::TYPE_VIDEO) {
+      info.video_track = track;
+      break;
+    }
+  }
+
+  if (info.video_track == nullptr) {
+    std::cerr << "Error: no video track found\n";
+    return 1;
+  }
+
+  info.video_duration_ms = info.video_track->GetDurationMs();
+  info.video_timescale = info.video_track->GetMediaTimeScale();
+
+  if (debug_level > 0) {
+    std::cerr << "Video track ID: " << info.video_track->GetId() << "\n";
+    std::cerr << "Video duration: " << info.video_duration_ms << " ms\n";
+    std::cerr << "Video timescale: " << info.video_timescale << "\n";
+    std::cerr << "Video sample count: " << info.video_track->GetSampleCount()
+              << "\n";
+  }
+
+  return 0;
+}
 
 // Forward declaration
 int mp4seek(const std::string& infile, const std::string& outfile,
@@ -80,7 +143,6 @@ int main(int argc, char* argv[]) {
   return mp4seek(infile, outfile, debug_level, sseof);
 }
 
-
 // Trimming Algorithm
 // 1. Parse file, get video track duration
 // 2. Calculate target_time = duration - msec
@@ -91,6 +153,19 @@ int main(int argc, char* argv[]) {
 // 7. Rewrite moov box with updated sample tables
 int mp4seek(const std::string& infile, const std::string& outfile,
             int debug_level, float sseof) {
-  // TODO: Implement MP4 seeking/trimming logic
+  // 1. Parse file, get video track duration
+  Mp4Info info;
+  int result = parse_mp4_file(infile, debug_level, info);
+  if (result != 0) {
+    return result;
+  }
+
+  // 2. Calculate target_time = duration - msec
+  // 3. Find sample index at target_time
+  // 4. Find previous sync sample (keyframe)
+  // 5. Cut video from that sync sample
+  // 6. Cut audio at same timestamp
+  // 7. Rewrite moov box with updated sample tables
+
   return 0;
 }
