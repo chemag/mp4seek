@@ -80,6 +80,15 @@ int main(int argc, char* argv[]) {
   return mp4seek(infile, outfile, debug_level, sseof);
 }
 
+
+// Trimming Algorithm
+// 1. Parse file, get video track duration
+// 2. Calculate target_time = duration - msec
+// 3. Find sample index at target_time
+// 4. Find previous sync sample (keyframe)
+// 5. Cut video from that sync sample
+// 6. Cut audio at same timestamp
+// 7. Rewrite moov box with updated sample tables
 int mp4seek(const std::string& infile, const std::string& outfile,
             int debug_level, float sseof) {
   // TODO: Implement MP4 seeking/trimming logic
