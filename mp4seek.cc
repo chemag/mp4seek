@@ -135,8 +135,10 @@ struct Mp4Info {
   std::unique_ptr<AP4_File> file;
   AP4_Movie* movie;
   AP4_Track* video_track;
+  AP4_Track* audio_track;
   AP4_UI32 video_duration_ms;
   AP4_UI32 video_timescale;
+  AP4_UI32 audio_timescale;
 };
 
 // Parse MP4 file and extract video track info
@@ -159,15 +161,19 @@ int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
     return 1;
   }
 
-  // Find the video track
+  // Find the video and audio tracks
   info.video_track = nullptr;
+  info.audio_track = nullptr;
   AP4_List<AP4_Track>& tracks = info.movie->GetTracks();
   for (AP4_List<AP4_Track>::Item* item = tracks.FirstItem(); item != nullptr;
        item = item->GetNext()) {
     AP4_Track* track = item->GetData();
-    if (track->GetType() == AP4_Track::TYPE_VIDEO) {
+    if (track->GetType() == AP4_Track::TYPE_VIDEO &&
+        info.video_track == nullptr) {
       info.video_track = track;
-      break;
+    } else if (track->GetType() == AP4_Track::TYPE_AUDIO &&
+               info.audio_track == nullptr) {
+      info.audio_track = track;
     }
   }
 
@@ -178,6 +184,8 @@ int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
 
   info.video_duration_ms = info.video_track->GetDurationMs();
   info.video_timescale = info.video_track->GetMediaTimeScale();
+  info.audio_timescale =
+      info.audio_track ? info.audio_track->GetMediaTimeScale() : 0;
 
   if (debug_level > 0) {
     fprintf(stderr, "Video track ID: %d\n", info.video_track->GetId());
@@ -185,6 +193,241 @@ int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
     fprintf(stderr, "Video timescale: %u\n", info.video_timescale);
     fprintf(stderr, "Video sample count: %u\n",
             info.video_track->GetSampleCount());
+    if (info.audio_track) {
+      fprintf(stderr, "Audio track ID: %d\n", info.audio_track->GetId());
+      fprintf(stderr, "Audio timescale: %u\n", info.audio_timescale);
+      fprintf(stderr, "Audio sample count: %u\n",
+              info.audio_track->GetSampleCount());
+    } else {
+      fprintf(stderr, "No audio track found\n");
+    }
+  }
+
+  return 0;
+}
+
+// Edit list info parsed from EDTS/ELST
+struct EdtsInfo {
+  bool has_edts;
+  AP4_SI64 media_time;        // Media time offset (in media timescale)
+  AP4_UI64 segment_duration;  // Segment duration (in movie timescale)
+  bool has_empty_edit;        // True if there's an initial empty edit (delay)
+  AP4_UI64 empty_duration;    // Duration of empty edit (in movie timescale)
+};
+
+// Parse EDTS from a track
+// Returns EdtsInfo with parsed values
+EdtsInfo parse_track_edts(AP4_Track* track, int debug_level) {
+  EdtsInfo edts_info = {false, 0, 0, false, 0};
+
+  const AP4_TrakAtom* trak = track->GetTrakAtom();
+  if (trak == nullptr) {
+    return edts_info;
+  }
+
+  AP4_ContainerAtom* edts =
+      AP4_DYNAMIC_CAST(AP4_ContainerAtom, trak->GetChild(AP4_ATOM_TYPE_EDTS));
+  if (edts == nullptr) {
+    return edts_info;
+  }
+
+  AP4_ElstAtom* elst =
+      AP4_DYNAMIC_CAST(AP4_ElstAtom, edts->GetChild(AP4_ATOM_TYPE_ELST));
+  if (elst == nullptr) {
+    return edts_info;
+  }
+
+  AP4_Array<AP4_ElstEntry>& entries = elst->GetEntries();
+  if (entries.ItemCount() == 0) {
+    return edts_info;
+  }
+
+  edts_info.has_edts = true;
+
+  // Process edit list entries
+  for (unsigned int i = 0; i < entries.ItemCount(); i++) {
+    AP4_ElstEntry& entry = entries[i];
+
+    if (entry.m_MediaTime == -1) {
+      // Empty edit (initial delay)
+      edts_info.has_empty_edit = true;
+      edts_info.empty_duration = entry.m_SegmentDuration;
+    } else {
+      // Normal edit - use the first non-empty edit
+      edts_info.media_time = entry.m_MediaTime;
+      edts_info.segment_duration = entry.m_SegmentDuration;
+      break;
+    }
+  }
+
+  if (debug_level > 1) {
+    fprintf(stderr, "  EDTS: media_time=%lld, segment_duration=%llu",
+            (long long)edts_info.media_time,
+            (unsigned long long)edts_info.segment_duration);
+    if (edts_info.has_empty_edit) {
+      fprintf(stderr, ", empty_duration=%llu",
+              (unsigned long long)edts_info.empty_duration);
+    }
+    fprintf(stderr, "\n");
+  }
+
+  return edts_info;
+}
+
+// Get the media time of a sample (in media timescale units)
+AP4_UI64 get_sample_media_time(AP4_Track* track, AP4_Ordinal sample_index) {
+  AP4_Sample sample;
+  if (AP4_FAILED(track->GetSample(sample_index, sample))) {
+    return 0;
+  }
+  return sample.GetDts();
+}
+
+// Step 6: Create a trimmed audio track with EDTS
+// video_cut_media_time is the video keyframe's DTS in video timescale
+// Returns 0 on success, non-zero on error
+int audio_track_trim_sseof(AP4_Track* input_audio_track,
+                           AP4_UI64 video_cut_media_time,
+                           AP4_UI32 video_timescale, AP4_UI32 movie_timescale,
+                           int debug_level, AP4_Track*& output_track,
+                           AP4_UI64& audio_skip_samples) {
+  // Parse input audio EDTS
+  EdtsInfo audio_edts = parse_track_edts(input_audio_track, debug_level);
+
+  AP4_UI32 audio_timescale = input_audio_track->GetMediaTimeScale();
+  AP4_Cardinal total_samples = input_audio_track->GetSampleCount();
+
+  // Convert video cut time to audio timescale
+  AP4_UI64 audio_cut_time =
+      AP4_ConvertTime(video_cut_media_time, video_timescale, audio_timescale);
+
+  // Account for input audio EDTS offset
+  if (audio_edts.has_edts && audio_edts.media_time > 0) {
+    // The audio media_time tells us where audio playback starts
+    // We need to adjust our cut point accordingly
+    audio_cut_time += audio_edts.media_time;
+  }
+
+  if (debug_level > 1) {
+    fprintf(stderr, "Audio cut time: %llu (audio timescale %u)\n",
+            (unsigned long long)audio_cut_time, audio_timescale);
+  }
+
+  // Find the audio sample at or before the cut time
+  AP4_Ordinal audio_start_sample = 0;
+  AP4_Result result = input_audio_track->GetSampleIndexForTimeStampMs(
+      static_cast<AP4_UI32>(
+          AP4_ConvertTime(audio_cut_time, audio_timescale, 1000)),
+      audio_start_sample);
+  if (AP4_FAILED(result)) {
+    // If we can't find the exact sample, start from the beginning
+    audio_start_sample = 0;
+  }
+
+  // Get the media time where this audio sample starts
+  AP4_UI64 audio_sample_start_time =
+      get_sample_media_time(input_audio_track, audio_start_sample);
+
+  // Calculate how many samples to skip at the beginning
+  // (the difference between the audio frame start and the actual cut point)
+  if (audio_cut_time > audio_sample_start_time) {
+    audio_skip_samples = audio_cut_time - audio_sample_start_time;
+  } else {
+    audio_skip_samples = 0;
+  }
+
+  if (debug_level > 0) {
+    fprintf(stderr, "Audio: starting at sample %u, skip %llu samples in EDTS\n",
+            audio_start_sample, (unsigned long long)audio_skip_samples);
+  }
+
+  // Create a synthetic sample table
+  AP4_SyntheticSampleTable* sample_table = new AP4_SyntheticSampleTable();
+
+  // Copy sample descriptions
+  for (unsigned int i = 0; i < input_audio_track->GetSampleDescriptionCount();
+       i++) {
+    AP4_SampleDescription* sample_desc =
+        input_audio_track->GetSampleDescription(i);
+    if (sample_desc == nullptr) {
+      fprintf(stderr, "Error: invalid audio sample description\n");
+      delete sample_table;
+      return 1;
+    }
+    sample_table->AddSampleDescription(sample_desc, false);
+  }
+
+  // Add samples from audio_start_sample to end
+  AP4_UI64 dts = 0;
+  AP4_Cardinal output_sample_count = 0;
+  for (AP4_Ordinal i = audio_start_sample; i < total_samples; i++) {
+    AP4_Sample sample;
+    result = input_audio_track->GetSample(i, sample);
+    if (AP4_FAILED(result)) {
+      fprintf(stderr, "Error: could not get audio sample %u\n", i);
+      delete sample_table;
+      return 1;
+    }
+
+    AP4_ByteStream* sample_stream = sample.GetDataStream();
+    if (sample_stream == nullptr) {
+      fprintf(stderr, "Error: could not get audio sample data stream %u\n", i);
+      delete sample_table;
+      return 1;
+    }
+
+    sample_table->AddSample(*sample_stream, sample.GetOffset(),
+                            sample.GetSize(), sample.GetDuration(),
+                            sample.GetDescriptionIndex(), dts,
+                            sample.GetCtsDelta(),
+                            true);  // audio samples are always sync
+    sample_stream->Release();
+
+    dts += sample.GetDuration();
+    output_sample_count++;
+  }
+
+  AP4_UI32 output_duration_ms =
+      static_cast<AP4_UI32>(AP4_ConvertTime(dts, audio_timescale, 1000));
+
+  if (debug_level > 0) {
+    fprintf(stderr, "Trimmed audio: samples %u-%u (%u samples), %u ms\n",
+            audio_start_sample, total_samples - 1, output_sample_count,
+            output_duration_ms);
+  }
+
+  // Create output track
+  output_track =
+      new AP4_Track(AP4_Track::TYPE_AUDIO, sample_table,
+                    2,  // track id (video is 1)
+                    movie_timescale,
+                    AP4_ConvertTime(output_duration_ms, 1000, movie_timescale),
+                    audio_timescale, dts,  // media duration
+                    input_audio_track->GetTrackLanguage(), 0,
+                    0);  // width, height (not applicable for audio)
+
+  // Add EDTS to skip the extra audio at the beginning
+  if (audio_skip_samples > 0) {
+    AP4_ContainerAtom* new_edts = new AP4_ContainerAtom(AP4_ATOM_TYPE_EDTS);
+    AP4_ElstAtom* new_elst = new AP4_ElstAtom();
+
+    // Calculate segment duration in movie timescale
+    // This is the duration of audio we want to play (total - skipped)
+    AP4_UI64 playable_duration = dts - audio_skip_samples;
+    AP4_UI64 segment_duration =
+        AP4_ConvertTime(playable_duration, audio_timescale, movie_timescale);
+
+    // media_time is where to start playback (skip the extra samples)
+    AP4_ElstEntry entry(segment_duration, audio_skip_samples, 1);
+    new_elst->AddEntry(entry);
+    new_edts->AddChild(new_elst);
+    output_track->UseTrakAtom()->AddChild(new_edts, 1);  // add after tkhd
+
+    if (debug_level > 0) {
+      fprintf(stderr, "Audio EDTS: media_time=%llu, segment_duration=%llu\n",
+              (unsigned long long)audio_skip_samples,
+              (unsigned long long)segment_duration);
+    }
   }
 
   return 0;
@@ -360,7 +603,27 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
   }
 
   // 6. Cut audio at same timestamp
-  // TODO: implement audio track trimming
+  AP4_Track* output_audio_track = nullptr;
+  if (info.audio_track != nullptr) {
+    // Get the video keyframe's media time (DTS) to sync audio
+    AP4_UI64 video_cut_media_time =
+        get_sample_media_time(info.video_track, keyframe_frame_num);
+
+    if (debug_level > 0) {
+      fprintf(stderr, "Video cut media time: %llu (timescale %u)\n",
+              (unsigned long long)video_cut_media_time, info.video_timescale);
+    }
+
+    AP4_UI64 audio_skip_samples = 0;
+    result = audio_track_trim_sseof(info.audio_track, video_cut_media_time,
+                                    info.video_timescale,
+                                    info.movie->GetTimeScale(), debug_level,
+                                    output_audio_track, audio_skip_samples);
+    if (result != 0) {
+      delete output_video_track;
+      return result;
+    }
+  }
 
   // 7. Write output file
   // Create output movie
@@ -368,6 +631,11 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
 
   // Add video track to movie (movie takes ownership)
   output_movie->AddTrack(output_video_track);
+
+  // Add audio track to movie if present
+  if (output_audio_track != nullptr) {
+    output_movie->AddTrack(output_audio_track);
+  }
 
   // Create output file
   AP4_File output_file(output_movie);
