@@ -161,6 +161,20 @@ int mp4seek(const std::string& infile, const std::string& outfile,
   }
 
   // 2. Calculate target_time = duration - msec
+  AP4_UI32 sseof_ms = static_cast<AP4_UI32>(sseof * 1000.0f);
+  if (sseof_ms > info.video_duration_ms) {
+    std::cerr << "Error: sseof (" << sseof_ms << " ms) exceeds video duration ("
+              << info.video_duration_ms << " ms)\n";
+    return 1;
+  }
+  AP4_UI32 target_time_ms = info.video_duration_ms - sseof_ms;
+
+  if (debug_level > 0) {
+    std::cerr << "Target time: " << target_time_ms << " ms (duration "
+              << info.video_duration_ms << " ms - sseof " << sseof_ms
+              << " ms)\n";
+  }
+
   // 3. Find sample index at target_time
   // 4. Find previous sync sample (keyframe)
   // 5. Cut video from that sync sample
