@@ -1,3 +1,7 @@
+#include <getopt.h>
+
+#include <climits>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -5,6 +9,126 @@
 #include <string>
 
 #include "Ap4.h"
+
+// Command line options
+struct ArgOptions {
+  int debug;
+  float sseof;
+  const char* infile;
+  const char* outfile;
+};
+
+const ArgOptions DEFAULT_OPTIONS{
+    .debug = 0,
+    .sseof = 0.0f,
+    .infile = nullptr,
+    .outfile = nullptr,
+};
+
+void print_usage(const char* program_name) {
+  fprintf(stderr, "usage: %s [options] <infile> <outfile>\n", program_name);
+  fprintf(stderr, "where options are:\n");
+  fprintf(stderr, "\t-d, --debug:\tIncrease debug verbosity [%i]\n",
+          DEFAULT_OPTIONS.debug);
+  fprintf(stderr, "\t-q, --quiet:\tSet debug verbosity to -1\n");
+  fprintf(stderr,
+          "\t--sseof <float>:\tSeek position in seconds from EOF [%.1f]\n",
+          DEFAULT_OPTIONS.sseof);
+  fprintf(stderr, "\t-h, --help:\tShow this help message\n");
+}
+
+// Long options with no equivalent short option
+enum {
+  QUIET_OPTION = CHAR_MAX + 1,
+  SSEOF_OPTION,
+  HELP_OPTION,
+};
+
+ArgOptions* parse_args(int argc, char** argv) {
+  int c;
+  char* endptr;
+  static ArgOptions options;
+
+  // Set default option values
+  options = DEFAULT_OPTIONS;
+
+  // getopt_long stores the option index here
+  int optindex = 0;
+
+  // Long options
+  static struct option longopts[] = {
+      // Matching options to short options
+      {"debug", no_argument, nullptr, 'd'},
+      // Options without a short option
+      {"quiet", no_argument, nullptr, QUIET_OPTION},
+      {"sseof", required_argument, nullptr, SSEOF_OPTION},
+      {"help", no_argument, nullptr, HELP_OPTION},
+      {nullptr, 0, nullptr, 0}};
+
+  // Parse arguments
+  while (true) {
+    c = getopt_long(argc, argv, "dqh", longopts, &optindex);
+    if (c == -1) {
+      break;
+    }
+    switch (c) {
+      case 0:
+        // Long options that define flag
+        if (longopts[optindex].flag != nullptr) {
+          break;
+        }
+        break;
+
+      case 'd':
+        options.debug += 1;
+        break;
+
+      case 'q':
+      case QUIET_OPTION:
+        options.debug = -1;
+        break;
+
+      case SSEOF_OPTION:
+        options.sseof = strtof(optarg, &endptr);
+        if (*endptr != '\0') {
+          fprintf(stderr, "Error: Invalid float value for --sseof: %s\n",
+                  optarg);
+          print_usage(argv[0]);
+          return nullptr;
+        }
+        break;
+
+      case HELP_OPTION:
+      case 'h':
+        print_usage(argv[0]);
+        exit(0);
+
+      default:
+        fprintf(stderr, "Unsupported option: %c\n", c);
+        print_usage(argv[0]);
+        return nullptr;
+    }
+  }
+
+  // Get positional arguments (infile, outfile)
+  int remaining = argc - optind;
+  if (remaining < 2) {
+    fprintf(stderr, "Error: Both infile and outfile are required\n");
+    print_usage(argv[0]);
+    return nullptr;
+  }
+  if (remaining > 2) {
+    fprintf(stderr, "Error: Too many positional arguments (%d extra)\n",
+            remaining - 2);
+    print_usage(argv[0]);
+    return nullptr;
+  }
+
+  options.infile = argv[optind];
+  options.outfile = argv[optind + 1];
+
+  return &options;
+}
 
 // Parsed MP4 file info
 struct Mp4Info {
@@ -17,12 +141,12 @@ struct Mp4Info {
 
 // Parse MP4 file and extract video track info
 // Returns 0 on success, non-zero on error
-int parse_mp4_file(const std::string& infile, int debug_level, Mp4Info& info) {
+int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
   AP4_ByteStream* input = nullptr;
   AP4_Result result = AP4_FileByteStream::Create(
-      infile.c_str(), AP4_FileByteStream::STREAM_MODE_READ, input);
+      infile, AP4_FileByteStream::STREAM_MODE_READ, input);
   if (AP4_FAILED(result)) {
-    std::cerr << "Error: cannot open input file: " << infile << "\n";
+    fprintf(stderr, "Error: cannot open input file: %s\n", infile);
     return 1;
   }
 
@@ -31,7 +155,7 @@ int parse_mp4_file(const std::string& infile, int debug_level, Mp4Info& info) {
 
   info.movie = info.file->GetMovie();
   if (info.movie == nullptr) {
-    std::cerr << "Error: no movie found in file\n";
+    fprintf(stderr, "Error: no movie found in file\n");
     return 1;
   }
 
@@ -48,7 +172,7 @@ int parse_mp4_file(const std::string& infile, int debug_level, Mp4Info& info) {
   }
 
   if (info.video_track == nullptr) {
-    std::cerr << "Error: no video track found\n";
+    fprintf(stderr, "Error: no video track found\n");
     return 1;
   }
 
@@ -56,91 +180,14 @@ int parse_mp4_file(const std::string& infile, int debug_level, Mp4Info& info) {
   info.video_timescale = info.video_track->GetMediaTimeScale();
 
   if (debug_level > 0) {
-    std::cerr << "Video track ID: " << info.video_track->GetId() << "\n";
-    std::cerr << "Video duration: " << info.video_duration_ms << " ms\n";
-    std::cerr << "Video timescale: " << info.video_timescale << "\n";
-    std::cerr << "Video sample count: " << info.video_track->GetSampleCount()
-              << "\n";
+    fprintf(stderr, "Video track ID: %d\n", info.video_track->GetId());
+    fprintf(stderr, "Video duration: %u ms\n", info.video_duration_ms);
+    fprintf(stderr, "Video timescale: %u\n", info.video_timescale);
+    fprintf(stderr, "Video sample count: %u\n",
+            info.video_track->GetSampleCount());
   }
 
   return 0;
-}
-
-// Forward declaration
-int mp4seek(const std::string& infile, const std::string& outfile,
-            int debug_level, float sseof);
-
-void print_usage(const char* program_name) {
-  std::cerr << "Usage: " << program_name << " [options] <infile> <outfile>\n"
-            << "\n"
-            << "Options:\n"
-            << "  -q, --quiet       Quiet mode (debug_level = -1)\n"
-            << "  -d, --debug       Increase debug level (can be repeated)\n"
-            << "  --sseof <float>   Seek position in seconds from end of file\n"
-            << "  -h, --help        Show this help message\n";
-}
-
-int main(int argc, char* argv[]) {
-  int debug_level = 0;
-  float sseof = 0.0f;
-  std::string infile;
-  std::string outfile;
-
-  // Parse command line arguments
-  for (int i = 1; i < argc; ++i) {
-    if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--quiet") == 0) {
-      debug_level = -1;
-    } else if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--debug") == 0) {
-      ++debug_level;
-    } else if (strcmp(argv[i], "--sseof") == 0) {
-      if (i + 1 >= argc) {
-        std::cerr << "Error: --sseof requires a float argument\n";
-        return 1;
-      }
-      ++i;
-      char* endptr;
-      sseof = std::strtof(argv[i], &endptr);
-      if (*endptr != '\0') {
-        std::cerr << "Error: Invalid float value for --sseof: " << argv[i]
-                  << "\n";
-        return 1;
-      }
-    } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-      print_usage(argv[0]);
-      return 0;
-    } else if (argv[i][0] == '-') {
-      std::cerr << "Error: Unknown option: " << argv[i] << "\n";
-      print_usage(argv[0]);
-      return 1;
-    } else {
-      // Positional arguments
-      if (infile.empty()) {
-        infile = argv[i];
-      } else if (outfile.empty()) {
-        outfile = argv[i];
-      } else {
-        std::cerr << "Error: Too many positional arguments\n";
-        print_usage(argv[0]);
-        return 1;
-      }
-    }
-  }
-
-  // Validate required arguments
-  if (infile.empty() || outfile.empty()) {
-    std::cerr << "Error: Both infile and outfile are required\n";
-    print_usage(argv[0]);
-    return 1;
-  }
-
-  if (debug_level > 0) {
-    std::cerr << "Input file: " << infile << "\n";
-    std::cerr << "Output file: " << outfile << "\n";
-    std::cerr << "Debug level: " << debug_level << "\n";
-    std::cerr << "Seek from EOF: " << sseof << " seconds\n";
-  }
-
-  return mp4seek(infile, outfile, debug_level, sseof);
 }
 
 // Trimming Algorithm
@@ -151,8 +198,8 @@ int main(int argc, char* argv[]) {
 // 5. Cut video from that sync sample
 // 6. Cut audio at same timestamp
 // 7. Rewrite moov box with updated sample tables
-int mp4seek(const std::string& infile, const std::string& outfile,
-            int debug_level, float sseof) {
+int mp4seek(const char* infile, const char* outfile, int debug_level,
+            float sseof) {
   // 1. Parse file, get video track duration
   Mp4Info info;
   int result = parse_mp4_file(infile, debug_level, info);
@@ -163,16 +210,15 @@ int mp4seek(const std::string& infile, const std::string& outfile,
   // 2. Calculate target_time = duration - msec
   AP4_UI32 sseof_ms = static_cast<AP4_UI32>(sseof * 1000.0f);
   if (sseof_ms > info.video_duration_ms) {
-    std::cerr << "Error: sseof (" << sseof_ms << " ms) exceeds video duration ("
-              << info.video_duration_ms << " ms)\n";
+    fprintf(stderr, "Error: sseof (%u ms) exceeds video duration (%u ms)\n",
+            sseof_ms, info.video_duration_ms);
     return 1;
   }
   AP4_UI32 target_time_ms = info.video_duration_ms - sseof_ms;
 
   if (debug_level > 0) {
-    std::cerr << "Target time: " << target_time_ms << " ms (duration "
-              << info.video_duration_ms << " ms - sseof " << sseof_ms
-              << " ms)\n";
+    fprintf(stderr, "Target time: %u ms (duration %u ms - sseof %u ms)\n",
+            target_time_ms, info.video_duration_ms, sseof_ms);
   }
 
   // 3. Find sample index at target_time
@@ -182,4 +228,23 @@ int mp4seek(const std::string& infile, const std::string& outfile,
   // 7. Rewrite moov box with updated sample tables
 
   return 0;
+}
+
+int main(int argc, char* argv[]) {
+  // Parse args
+  ArgOptions* options = parse_args(argc, argv);
+  if (options == nullptr) {
+    return 1;
+  }
+
+  // Print args
+  if (options->debug > 0) {
+    fprintf(stderr, "Input file: %s\n", options->infile);
+    fprintf(stderr, "Output file: %s\n", options->outfile);
+    fprintf(stderr, "Debug level: %d\n", options->debug);
+    fprintf(stderr, "Seek from EOF: %.3f seconds\n", options->sseof);
+  }
+
+  return mp4seek(options->infile, options->outfile, options->debug,
+                 options->sseof);
 }
