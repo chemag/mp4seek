@@ -190,6 +190,26 @@ int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
   return 0;
 }
 
+// Step 3: Find the frame at a given time
+// Returns 0 on success, non-zero on error
+// On success, frame_num contains the 0-based frame number
+int find_frame_at_time(AP4_Track* video_track, AP4_UI32 target_time_ms,
+                       int debug_level, AP4_Ordinal& frame_num) {
+  AP4_Result result =
+      video_track->GetSampleIndexForTimeStampMs(target_time_ms, frame_num);
+  if (AP4_FAILED(result)) {
+    fprintf(stderr, "Error: could not find frame at time %u ms\n",
+            target_time_ms);
+    return 1;
+  }
+
+  if (debug_level > 0) {
+    fprintf(stderr, "Frame at target time: %u\n", frame_num);
+  }
+
+  return 0;
+}
+
 // Trimming Algorithm
 // 1. Parse file, get video track duration
 // 2. Calculate target_time = duration - msec
@@ -221,7 +241,14 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
             target_time_ms, info.video_duration_ms, sseof_ms);
   }
 
-  // 3. Find sample index at target_time
+  // 3. Find frame at target_time
+  AP4_Ordinal frame_num = 0;
+  result = find_frame_at_time(info.video_track, target_time_ms, debug_level,
+                              frame_num);
+  if (result != 0) {
+    return result;
+  }
+
   // 4. Find previous sync sample (keyframe)
   // 5. Cut video from that sync sample
   // 6. Cut audio at same timestamp
