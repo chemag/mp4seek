@@ -1,6 +1,8 @@
 #include <getopt.h>
 
 #include <climits>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -11,16 +13,22 @@
 #include "Ap4.h"
 
 // Command line options
+// TODO(chemag): add support for --end, --end_frame, --end_pts
 struct ArgOptions {
   int debug;
-  float sseof;
+  // TODO(chemag): add support for sexagesimal format for time
+  float start;          // Start time in seconds (NaN if not set)
+  int64_t start_frame;  // Start frame number (INT64_MIN if not set)
+  int64_t start_pts;    // Start PTS value (INT64_MIN if not set)
   const char* infile;
   const char* outfile;
 };
 
 const ArgOptions DEFAULT_OPTIONS{
     .debug = 0,
-    .sseof = 0.0f,
+    .start = NAN,
+    .start_frame = INT64_MIN,
+    .start_pts = INT64_MIN,
     .infile = nullptr,
     .outfile = nullptr,
 };
@@ -32,15 +40,21 @@ void print_usage(const char* program_name) {
           DEFAULT_OPTIONS.debug);
   fprintf(stderr, "\t-q, --quiet:\tSet debug verbosity to -1\n");
   fprintf(stderr,
-          "\t--sseof <float>:\tSeek position in seconds from EOF [%.1f]\n",
-          DEFAULT_OPTIONS.sseof);
+          "\t--start <float>:\tStart time in seconds (negative = from end)\n");
+  fprintf(stderr,
+          "\t--start_frame <int>:\tStart frame number (negative = from end)\n");
+  fprintf(stderr,
+          "\t--start_pts <int>:\tStart PTS in video timescale (negative = from "
+          "end)\n");
   fprintf(stderr, "\t-h, --help:\tShow this help message\n");
 }
 
 // Long options with no equivalent short option
 enum {
   QUIET_OPTION = CHAR_MAX + 1,
-  SSEOF_OPTION,
+  START_OPTION,
+  START_FRAME_OPTION,
+  START_PTS_OPTION,
   HELP_OPTION,
 };
 
@@ -61,7 +75,9 @@ ArgOptions* parse_args(int argc, char** argv) {
       {"debug", no_argument, nullptr, 'd'},
       // Options without a short option
       {"quiet", no_argument, nullptr, QUIET_OPTION},
-      {"sseof", required_argument, nullptr, SSEOF_OPTION},
+      {"start", required_argument, nullptr, START_OPTION},
+      {"start_frame", required_argument, nullptr, START_FRAME_OPTION},
+      {"start_pts", required_argument, nullptr, START_PTS_OPTION},
       {"help", no_argument, nullptr, HELP_OPTION},
       {nullptr, 0, nullptr, 0}};
 
@@ -88,10 +104,31 @@ ArgOptions* parse_args(int argc, char** argv) {
         options.debug = -1;
         break;
 
-      case SSEOF_OPTION:
-        options.sseof = strtof(optarg, &endptr);
+      case START_OPTION:
+        options.start = strtof(optarg, &endptr);
         if (*endptr != '\0') {
-          fprintf(stderr, "Error: Invalid float value for --sseof: %s\n",
+          fprintf(stderr, "Error: Invalid float value for --start: %s\n",
+                  optarg);
+          print_usage(argv[0]);
+          return nullptr;
+        }
+        break;
+
+      case START_FRAME_OPTION:
+        options.start_frame = strtoll(optarg, &endptr, 10);
+        if (*endptr != '\0') {
+          fprintf(stderr,
+                  "Error: Invalid integer value for --start_frame: %s\n",
+                  optarg);
+          print_usage(argv[0]);
+          return nullptr;
+        }
+        break;
+
+      case START_PTS_OPTION:
+        options.start_pts = strtoll(optarg, &endptr, 10);
+        if (*endptr != '\0') {
+          fprintf(stderr, "Error: Invalid integer value for --start_pts: %s\n",
                   optarg);
           print_usage(argv[0]);
           return nullptr;
@@ -548,16 +585,123 @@ int video_track_trim_sseof(AP4_Track* input_track, AP4_Ordinal start_frame_num,
   return 0;
 }
 
+// Calculate start frame from options (--start, --start_frame, or --start_pts)
+// Returns 0 on success, non-zero on error
+// On success, frame_num contains the 0-based frame number
+int calculate_start_frame(AP4_Track* video_track, AP4_UI32 video_duration_ms,
+                          AP4_UI32 video_timescale, float start,
+                          int64_t start_frame, int64_t start_pts,
+                          int debug_level, AP4_Ordinal& frame_num) {
+  AP4_Cardinal total_frames = video_track->GetSampleCount();
+  int result = 0;
+
+  if (!std::isnan(start)) {
+    // --start: time in seconds
+    int64_t start_ms;
+    if (start < 0) {
+      // Negative: from end
+      start_ms = static_cast<int64_t>(video_duration_ms) +
+                 static_cast<int64_t>(start * 1000.0f);
+    } else {
+      // Positive: from beginning
+      start_ms = static_cast<int64_t>(start * 1000.0f);
+    }
+
+    if (start_ms < 0 || start_ms > static_cast<int64_t>(video_duration_ms)) {
+      fprintf(stderr, "Error: start time %lld ms is out of range (0-%u ms)\n",
+              (long long)start_ms, video_duration_ms);
+      return 1;
+    }
+
+    if (debug_level > 0) {
+      fprintf(stderr, "Start time: %lld ms (from --start %.3f)\n",
+              (long long)start_ms, start);
+    }
+
+    result = find_frame_at_time(video_track, static_cast<AP4_UI32>(start_ms),
+                                debug_level, frame_num);
+    if (result != 0) {
+      return result;
+    }
+
+  } else if (start_frame != INT64_MIN) {
+    // --start_frame: frame number
+    int64_t frame;
+    if (start_frame < 0) {
+      // Negative: from end
+      frame = static_cast<int64_t>(total_frames) + start_frame;
+    } else {
+      // Positive: from beginning
+      frame = start_frame;
+    }
+
+    if (frame < 0 || frame >= static_cast<int64_t>(total_frames)) {
+      fprintf(stderr, "Error: start frame %lld is out of range (0-%u)\n",
+              (long long)frame, total_frames - 1);
+      return 1;
+    }
+
+    frame_num = static_cast<AP4_Ordinal>(frame);
+
+    if (debug_level > 0) {
+      fprintf(stderr, "Start frame: %u (from --start_frame %lld)\n", frame_num,
+              (long long)start_frame);
+    }
+
+  } else if (start_pts != INT64_MIN) {
+    // --start_pts: PTS value in video timescale
+    int64_t pts;
+    AP4_UI64 total_duration_pts =
+        AP4_ConvertTime(video_duration_ms, 1000, video_timescale);
+
+    if (start_pts < 0) {
+      // Negative: from end
+      pts = static_cast<int64_t>(total_duration_pts) + start_pts;
+    } else {
+      // Positive: from beginning
+      pts = start_pts;
+    }
+
+    if (pts < 0 || pts > static_cast<int64_t>(total_duration_pts)) {
+      fprintf(stderr, "Error: start PTS %lld is out of range (0-%llu)\n",
+              (long long)pts, (unsigned long long)total_duration_pts);
+      return 1;
+    }
+
+    // Convert PTS to milliseconds and find frame
+    AP4_UI32 target_ms =
+        static_cast<AP4_UI32>(AP4_ConvertTime(pts, video_timescale, 1000));
+
+    if (debug_level > 0) {
+      fprintf(stderr, "Start PTS: %lld (from --start_pts %lld) = %u ms\n",
+              (long long)pts, (long long)start_pts, target_ms);
+    }
+
+    result = find_frame_at_time(video_track, target_ms, debug_level, frame_num);
+    if (result != 0) {
+      return result;
+    }
+
+  } else {
+    fprintf(
+        stderr,
+        "Error: one of --start, --start_frame, or --start_pts is required\n");
+    return 1;
+  }
+
+  return 0;
+}
+
 // Trimming Algorithm
 // 1. Parse file, get video track duration
-// 2. Calculate target_time = duration - msec
-// 3. Find sample index at target_time
-// 4. Find previous sync sample (keyframe)
-// 5. Cut video from that sync sample
-// 6. Cut audio at same timestamp
-// 7. Rewrite moov box with updated sample tables
+// 2. Calculate start frame from options (--start, --start_frame, or
+// --start_pts)
+// 3. Find previous sync sample (keyframe) at or before start frame
+// 4. Cut video from that sync sample
+// 5. Cut audio at same timestamp
+// 6. Rewrite moov box with updated sample tables
 int mp4seek(const char* infile, const char* outfile, int debug_level,
-            float sseof) {
+            float start, int64_t start_frame, int64_t start_pts) {
   // 1. Parse file, get video track duration
   Mp4Info info;
   int result = parse_mp4_file(infile, debug_level, info);
@@ -565,33 +709,20 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
     return result;
   }
 
-  // 2. Calculate target_time = duration - msec
-  AP4_UI32 sseof_ms = static_cast<AP4_UI32>(sseof * 1000.0f);
-  if (sseof_ms > info.video_duration_ms) {
-    fprintf(stderr, "Error: sseof (%u ms) exceeds video duration (%u ms)\n",
-            sseof_ms, info.video_duration_ms);
-    return 1;
-  }
-  AP4_UI32 target_time_ms = info.video_duration_ms - sseof_ms;
-
-  if (debug_level > 0) {
-    fprintf(stderr, "Target time: %u ms (duration %u ms - sseof %u ms)\n",
-            target_time_ms, info.video_duration_ms, sseof_ms);
-  }
-
-  // 3. Find frame at target_time
+  // 2. Calculate start frame from the provided option
   AP4_Ordinal frame_num = 0;
-  result = find_frame_at_time(info.video_track, target_time_ms, debug_level,
-                              frame_num);
+  result = calculate_start_frame(info.video_track, info.video_duration_ms,
+                                 info.video_timescale, start, start_frame,
+                                 start_pts, debug_level, frame_num);
   if (result != 0) {
     return result;
   }
 
-  // 4. Find previous sync sample (keyframe)
+  // 3. Find previous sync sample (keyframe)
   AP4_Ordinal keyframe_frame_num =
       find_keyframe_before_frame(info.video_track, frame_num, debug_level);
 
-  // 5. Cut video from that sync sample
+  // 4. Cut video from that sync sample
   AP4_Track* output_video_track = nullptr;
   AP4_UI32 output_duration_ms = 0;
   AP4_Cardinal output_frame_count = 0;
@@ -677,9 +808,17 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "Input file: %s\n", options->infile);
     fprintf(stderr, "Output file: %s\n", options->outfile);
     fprintf(stderr, "Debug level: %d\n", options->debug);
-    fprintf(stderr, "Seek from EOF: %.3f seconds\n", options->sseof);
+    if (!std::isnan(options->start)) {
+      fprintf(stderr, "Start: %.3f seconds\n", options->start);
+    }
+    if (options->start_frame != INT64_MIN) {
+      fprintf(stderr, "Start frame: %lld\n", (long long)options->start_frame);
+    }
+    if (options->start_pts != INT64_MIN) {
+      fprintf(stderr, "Start PTS: %lld\n", (long long)options->start_pts);
+    }
   }
 
   return mp4seek(options->infile, options->outfile, options->debug,
-                 options->sseof);
+                 options->start, options->start_frame, options->start_pts);
 }
