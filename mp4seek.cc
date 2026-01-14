@@ -210,6 +210,20 @@ int find_frame_at_time(AP4_Track* video_track, AP4_UI32 target_time_ms,
   return 0;
 }
 
+// Step 4: Find the keyframe (sync sample) at or before a given frame
+// Returns the 0-based frame number of the keyframe
+AP4_Ordinal find_keyframe_before_frame(AP4_Track* video_track,
+                                       AP4_Ordinal frame_num, int debug_level) {
+  AP4_Ordinal keyframe_frame_num =
+      video_track->GetNearestSyncSampleIndex(frame_num, true);
+
+  if (debug_level > 0) {
+    fprintf(stderr, "Keyframe before target: frame %u\n", keyframe_frame_num);
+  }
+
+  return keyframe_frame_num;
+}
+
 // Trimming Algorithm
 // 1. Parse file, get video track duration
 // 2. Calculate target_time = duration - msec
@@ -250,6 +264,9 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
   }
 
   // 4. Find previous sync sample (keyframe)
+  AP4_Ordinal keyframe_frame_num =
+      find_keyframe_before_frame(info.video_track, frame_num, debug_level);
+
   // 5. Cut video from that sync sample
   // 6. Cut audio at same timestamp
   // 7. Rewrite moov box with updated sample tables
