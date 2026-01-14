@@ -224,6 +224,87 @@ AP4_Ordinal find_keyframe_before_frame(AP4_Track* video_track,
   return keyframe_frame_num;
 }
 
+// Step 5: Create a trimmed video track containing frames from start_frame_num
+// to end Returns 0 on success, non-zero on error On success, output_track,
+// output_duration_ms, and output_frame_count are set
+int video_track_trim_sseof(AP4_Track* input_track, AP4_Ordinal start_frame_num,
+                           AP4_UI32 movie_timescale, int debug_level,
+                           AP4_Track*& output_track,
+                           AP4_UI32& output_duration_ms,
+                           AP4_Cardinal& output_frame_count) {
+  AP4_Cardinal total_samples = input_track->GetSampleCount();
+
+  // Create a synthetic sample table to hold the output samples
+  AP4_SyntheticSampleTable* sample_table = new AP4_SyntheticSampleTable();
+
+  // Copy sample descriptions from input track (usually just one)
+  for (unsigned int i = 0; i < input_track->GetSampleDescriptionCount(); i++) {
+    AP4_SampleDescription* sample_desc = input_track->GetSampleDescription(i);
+    if (sample_desc == nullptr) {
+      fprintf(stderr, "Error: invalid sample description\n");
+      delete sample_table;
+      return 1;
+    }
+    sample_table->AddSampleDescription(sample_desc, false);
+  }
+
+  // Add samples from start_frame_num to end
+  AP4_UI64 dts = 0;
+  output_frame_count = 0;
+  for (AP4_Ordinal i = start_frame_num; i < total_samples; i++) {
+    AP4_Sample sample;
+    AP4_Result result = input_track->GetSample(i, sample);
+    if (AP4_FAILED(result)) {
+      fprintf(stderr, "Error: could not get sample %u\n", i);
+      delete sample_table;
+      return 1;
+    }
+
+    // Get sample data stream
+    AP4_ByteStream* sample_stream = sample.GetDataStream();
+    if (sample_stream == nullptr) {
+      fprintf(stderr, "Error: could not get sample data stream for sample %u\n",
+              i);
+      delete sample_table;
+      return 1;
+    }
+
+    // Add sample to the table
+    sample_table->AddSample(*sample_stream, sample.GetOffset(),
+                            sample.GetSize(), sample.GetDuration(),
+                            sample.GetDescriptionIndex(), dts,
+                            sample.GetCtsDelta(), sample.IsSync());
+    sample_stream->Release();
+
+    dts += sample.GetDuration();
+    output_frame_count++;
+  }
+
+  // Compute output duration in milliseconds
+  output_duration_ms = static_cast<AP4_UI32>(
+      AP4_ConvertTime(dts, input_track->GetMediaTimeScale(), 1000));
+
+  if (debug_level > 0) {
+    fprintf(stderr, "Trimmed video: frames %u-%u (%u frames), %u ms\n",
+            start_frame_num, total_samples - 1, output_frame_count,
+            output_duration_ms);
+  }
+
+  // Create output track
+  output_track =
+      new AP4_Track(AP4_Track::TYPE_VIDEO, sample_table,
+                    1,  // track id
+                    movie_timescale,
+                    AP4_ConvertTime(output_duration_ms, 1000,
+                                    movie_timescale),  // track duration
+                    input_track->GetMediaTimeScale(),
+                    dts,  // media duration
+                    input_track->GetTrackLanguage(), input_track->GetWidth(),
+                    input_track->GetHeight());
+
+  return 0;
+}
+
 // Trimming Algorithm
 // 1. Parse file, get video track duration
 // 2. Calculate target_time = duration - msec
@@ -268,8 +349,50 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
       find_keyframe_before_frame(info.video_track, frame_num, debug_level);
 
   // 5. Cut video from that sync sample
+  AP4_Track* output_video_track = nullptr;
+  AP4_UI32 output_duration_ms = 0;
+  AP4_Cardinal output_frame_count = 0;
+  result = video_track_trim_sseof(
+      info.video_track, keyframe_frame_num, info.movie->GetTimeScale(),
+      debug_level, output_video_track, output_duration_ms, output_frame_count);
+  if (result != 0) {
+    return result;
+  }
+
   // 6. Cut audio at same timestamp
-  // 7. Rewrite moov box with updated sample tables
+  // TODO: implement audio track trimming
+
+  // 7. Write output file
+  // Create output movie
+  AP4_Movie* output_movie = new AP4_Movie(info.movie->GetTimeScale());
+
+  // Add video track to movie (movie takes ownership)
+  output_movie->AddTrack(output_video_track);
+
+  // Create output file
+  AP4_File output_file(output_movie);
+
+  // Set file type (MP4 video)
+  AP4_UI32 compatible_brands[2] = {AP4_FILE_BRAND_ISOM, AP4_FILE_BRAND_MP42};
+  output_file.SetFileType(AP4_FILE_BRAND_MP42, 0, compatible_brands, 2);
+
+  // Create output stream
+  AP4_ByteStream* output_stream = nullptr;
+  AP4_Result ap4_result = AP4_FileByteStream::Create(
+      outfile, AP4_FileByteStream::STREAM_MODE_WRITE, output_stream);
+  if (AP4_FAILED(ap4_result)) {
+    fprintf(stderr, "Error: cannot open output file: %s\n", outfile);
+    return 1;
+  }
+
+  // Write output file
+  AP4_FileWriter::Write(output_file, *output_stream);
+  output_stream->Release();
+
+  if (debug_level >= 0) {
+    fprintf(stderr, "Wrote %s (%u ms, %u frames)\n", outfile,
+            output_duration_ms, output_frame_count);
+  }
 
   return 0;
 }
