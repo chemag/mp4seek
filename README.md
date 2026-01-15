@@ -2,6 +2,8 @@
 
 mp4seek is a tool for trimming MP4 files at keyframe boundaries without transcoding. It performs stream copy (remux) operations, copying video NALUs and audio frames without re-encoding.
 
+mp4seek is based on [Bento4](https://github.com/axiomatic-systems/Bento4.git). The goal is to show how to use bento4 to edit ISOBMFF files.
+
 
 # 2. Features
 
@@ -127,3 +129,15 @@ Add -d flags for debug output:
 * Requires video track (audio-only files not supported)
 * With --noaccurate_seek, cut point is always at or before the requested position (snaps to previous keyframe)
 * With --accurate_seek (default), video starts at exact position via EDTS but includes pre-roll frames from keyframe
+
+
+# Appendix 1. Atom Ordering (Fast Start)
+
+mp4seek always writes the output file with the moov (metadata) atom before mdat (actual video data), regardless of the input file's atom order. This is commonly called "fast start" or "web optimized" layout.
+
+| Layout        | Atom Order       | Behavior                                        |
+|---------------|------------------|-------------------------------------------------|
+| moov at end   | ftyp, mdat, moov | Must read entire file before playback can start |
+| moov at front | ftyp, moov, mdat | Enables progressive playback and streaming      |
+
+Input files may have moov at the end (common for single-pass encoding) or at the end. mp4seek outputs are always moov-first. This is generally desirable for streaming and web delivery. Tools like ffmpeg use `-movflags +faststart` to achieve the same result.
