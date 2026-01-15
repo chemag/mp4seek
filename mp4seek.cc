@@ -484,6 +484,82 @@ int audio_track_trim_sseof(AP4_Track* input_audio_track,
     }
   }
 
+  // Copy sample grouping atoms (sgpd/sbgp) from input to output
+  // These contain audio pre-roll information
+  AP4_Atom* input_stbl =
+      input_audio_track->UseTrakAtom()->FindChild("mdia/minf/stbl");
+  AP4_Atom* output_stbl =
+      output_track->UseTrakAtom()->FindChild("mdia/minf/stbl");
+  if (input_stbl != nullptr && output_stbl != nullptr) {
+    AP4_ContainerAtom* input_stbl_container =
+        AP4_DYNAMIC_CAST(AP4_ContainerAtom, input_stbl);
+    AP4_ContainerAtom* output_stbl_container =
+        AP4_DYNAMIC_CAST(AP4_ContainerAtom, output_stbl);
+    if (input_stbl_container != nullptr && output_stbl_container != nullptr) {
+      // Copy sgpd (Sample Group Description) - no changes needed
+      AP4_Atom* sgpd = input_stbl_container->GetChild(AP4_ATOM_TYPE_SGPD);
+      if (sgpd != nullptr) {
+        AP4_Atom* sgpd_clone = sgpd->Clone();
+        if (sgpd_clone != nullptr) {
+          output_stbl_container->AddChild(sgpd_clone);
+        }
+      }
+      // Copy sbgp (Sample to Group) with recalculated entries
+      AP4_Atom* sbgp = input_stbl_container->GetChild(AP4_ATOM_TYPE_SBGP);
+      if (sbgp != nullptr) {
+        AP4_SbgpAtom* input_sbgp = AP4_DYNAMIC_CAST(AP4_SbgpAtom, sbgp);
+        if (input_sbgp != nullptr) {
+          // Clone and modify entries
+          AP4_Atom* sbgp_clone = sbgp->Clone();
+          AP4_SbgpAtom* output_sbgp =
+              AP4_DYNAMIC_CAST(AP4_SbgpAtom, sbgp_clone);
+          if (output_sbgp != nullptr) {
+            AP4_Array<AP4_SbgpAtom::Entry>& input_entries =
+                input_sbgp->GetEntries();
+            AP4_Array<AP4_SbgpAtom::Entry>& output_entries =
+                output_sbgp->GetEntries();
+
+            // Clear output entries and rebuild for trimmed range
+            output_entries.Clear();
+
+            // Track cumulative sample index in input
+            AP4_UI32 cumulative_sample = 0;
+            for (AP4_Cardinal i = 0; i < input_entries.ItemCount(); i++) {
+              AP4_UI32 entry_start = cumulative_sample;
+              AP4_UI32 entry_end =
+                  cumulative_sample + input_entries[i].sample_count;
+
+              // Check if this entry overlaps with kept range
+              // Kept range: [audio_start_sample, total_samples)
+              if (entry_end > audio_start_sample &&
+                  entry_start < total_samples) {
+                // Calculate overlap
+                AP4_UI32 overlap_start = (entry_start > audio_start_sample)
+                                             ? entry_start
+                                             : audio_start_sample;
+                AP4_UI32 overlap_end =
+                    (entry_end < total_samples) ? entry_end : total_samples;
+                AP4_UI32 new_sample_count = overlap_end - overlap_start;
+
+                if (new_sample_count > 0) {
+                  AP4_SbgpAtom::Entry new_entry;
+                  new_entry.sample_count = new_sample_count;
+                  new_entry.group_description_index =
+                      input_entries[i].group_description_index;
+                  output_entries.Append(new_entry);
+                }
+              }
+
+              cumulative_sample = entry_end;
+            }
+
+            output_stbl_container->AddChild(output_sbgp);
+          }
+        }
+      }
+    }
+  }
+
   return 0;
 }
 
