@@ -830,9 +830,18 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
   // Create output file
   AP4_File output_file(output_movie);
 
-  // Set file type (MP4 video)
-  AP4_UI32 compatible_brands[2] = {AP4_FILE_BRAND_ISOM, AP4_FILE_BRAND_MP42};
-  output_file.SetFileType(AP4_FILE_BRAND_MP42, 0, compatible_brands, 2);
+  // Copy file type from input file
+  AP4_FtypAtom* input_ftyp = info.file->GetFileType();
+  if (input_ftyp != nullptr) {
+    AP4_Array<AP4_UI32>& brands = input_ftyp->GetCompatibleBrands();
+    output_file.SetFileType(
+        input_ftyp->GetMajorBrand(), input_ftyp->GetMinorVersion(),
+        brands.ItemCount() > 0 ? &brands[0] : nullptr, brands.ItemCount());
+  } else {
+    // Fallback if no ftyp in input
+    AP4_UI32 compatible_brands[2] = {AP4_FILE_BRAND_ISOM, AP4_FILE_BRAND_MP42};
+    output_file.SetFileType(AP4_FILE_BRAND_MP42, 0, compatible_brands, 2);
+  }
 
   // Create output stream
   AP4_ByteStream* output_stream = nullptr;
