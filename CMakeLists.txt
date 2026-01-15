@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_subdirectory(lib/bento4)
 
 # mp4seek library
-add_library(mp4seek_lib STATIC src/mp4seek.cc)
+add_library(mp4seek_lib STATIC src/mp4seek.cc src/mp4extract.cc)
 set_target_properties(mp4seek_lib PROPERTIES OUTPUT_NAME mp4seek)
 target_include_directories(mp4seek_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(mp4seek_lib ap4)
