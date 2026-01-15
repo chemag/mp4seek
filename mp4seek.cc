@@ -827,6 +827,18 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
     output_movie->AddTrack(output_audio_track);
   }
 
+  // Copy udta (user data/metadata) from input moov if present
+  AP4_MoovAtom* input_moov = info.movie->GetMoovAtom();
+  if (input_moov != nullptr) {
+    AP4_Atom* input_udta = input_moov->GetChild(AP4_ATOM_TYPE_UDTA);
+    if (input_udta != nullptr) {
+      AP4_Atom* output_udta = input_udta->Clone();
+      if (output_udta != nullptr) {
+        output_movie->GetMoovAtom()->AddChild(output_udta);
+      }
+    }
+  }
+
   // Create output file
   AP4_File output_file(output_movie);
 
