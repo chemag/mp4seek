@@ -1,3 +1,6 @@
 [submodule "lib/bento4"]
 	path = lib/bento4
 	url = https://github.com/axiomatic-systems/Bento4.git
+[submodule "lib/mp4v2"]
+	path = lib/mp4v2
+	url = https://github.com/enzo1982/mp4v2.git
