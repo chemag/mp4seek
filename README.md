@@ -141,3 +141,19 @@ mp4seek always writes the output file with the moov (metadata) atom before mdat 
 | moov at front | ftyp, moov, mdat | Enables progressive playback and streaming      |
 
 Input files may have moov at the end (common for single-pass encoding) or at the end. mp4seek outputs are always moov-first. This is generally desirable for streaming and web delivery. Tools like ffmpeg use `-movflags +faststart` to achieve the same result.
+
+
+# Appendix 2. Audio Sample Description Simplification
+
+mp4seek recreates the audio sample description (stsd/mp4a) rather than cloning it exactly from the input. This results in some metadata simplification:
+
+| Field/Atom           | Input                 | Output     |
+|----------------------|-----------------------|------------|
+| esds ES_ID           | Original value        | New value  |
+| streamDependenceFlag | May be set            | Always 0   |
+| dependsOn_ES_ID      | May reference video   | Removed    |
+| btrt atom            | Present with bitrates | Not copied |
+
+The btrt (Bitrate Box) contains buffer_size_db, max_bitrate, and avg_bitrate hints. The esds streamDependenceFlag and dependsOn_ES_ID indicate stream dependencies (e.g., audio depending on video).
+
+These are optional metadata fields. Audio playback is not affected; only bitrate hints and stream dependency information are lost.
