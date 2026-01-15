@@ -20,6 +20,7 @@ struct ArgOptions {
   float start;          // Start time in seconds (NaN if not set)
   int64_t start_frame;  // Start frame number (INT64_MIN if not set)
   int64_t start_pts;    // Start PTS value (INT64_MIN if not set)
+  bool accurate_seek;   // If true, use EDTS to seek to exact position
   const char* infile;
   const char* outfile;
 };
@@ -29,6 +30,7 @@ const ArgOptions DEFAULT_OPTIONS{
     .start = NAN,
     .start_frame = INT64_MIN,
     .start_pts = INT64_MIN,
+    .accurate_seek = false,
     .infile = nullptr,
     .outfile = nullptr,
 };
@@ -46,6 +48,9 @@ void print_usage(const char* program_name) {
   fprintf(stderr,
           "\t--start_pts <int>:\tStart PTS in video timescale (negative = from "
           "end)\n");
+  fprintf(stderr, "\t--accurate_seek:\tSeek to exact position using EDTS\n");
+  fprintf(stderr,
+          "\t--noaccurate_seek:\tSeek to nearest keyframe only [default]\n");
   fprintf(stderr, "\t-h, --help:\tShow this help message\n");
 }
 
@@ -55,6 +60,8 @@ enum {
   START_OPTION,
   START_FRAME_OPTION,
   START_PTS_OPTION,
+  ACCURATE_SEEK_OPTION,
+  NOACCURATE_SEEK_OPTION,
   HELP_OPTION,
 };
 
@@ -78,6 +85,8 @@ ArgOptions* parse_args(int argc, char** argv) {
       {"start", required_argument, nullptr, START_OPTION},
       {"start_frame", required_argument, nullptr, START_FRAME_OPTION},
       {"start_pts", required_argument, nullptr, START_PTS_OPTION},
+      {"accurate_seek", no_argument, nullptr, ACCURATE_SEEK_OPTION},
+      {"noaccurate_seek", no_argument, nullptr, NOACCURATE_SEEK_OPTION},
       {"help", no_argument, nullptr, HELP_OPTION},
       {nullptr, 0, nullptr, 0}};
 
@@ -133,6 +142,14 @@ ArgOptions* parse_args(int argc, char** argv) {
           print_usage(argv[0]);
           return nullptr;
         }
+        break;
+
+      case ACCURATE_SEEK_OPTION:
+        options.accurate_seek = true;
+        break;
+
+      case NOACCURATE_SEEK_OPTION:
+        options.accurate_seek = false;
         break;
 
       case HELP_OPTION:
@@ -505,9 +522,12 @@ AP4_Ordinal find_keyframe_before_frame(AP4_Track* video_track,
 }
 
 // Step 5: Create a trimmed video track containing frames from start_frame_num
-// to end Returns 0 on success, non-zero on error On success, output_track,
-// output_duration_ms, and output_frame_count are set
+// to end. If accurate_seek is true and target_frame_num > start_frame_num,
+// adds EDTS to skip to the target frame.
+// Returns 0 on success, non-zero on error. On success, output_track,
+// output_duration_ms, and output_frame_count are set.
 int video_track_trim_sseof(AP4_Track* input_track, AP4_Ordinal start_frame_num,
+                           AP4_Ordinal target_frame_num, bool accurate_seek,
                            AP4_UI32 movie_timescale, int debug_level,
                            AP4_Track*& output_track,
                            AP4_UI32& output_duration_ms,
@@ -581,6 +601,43 @@ int video_track_trim_sseof(AP4_Track* input_track, AP4_Ordinal start_frame_num,
                     dts,  // media duration
                     input_track->GetTrackLanguage(), input_track->GetWidth(),
                     input_track->GetHeight());
+
+  // Add EDTS for accurate seek if needed
+  if (accurate_seek && target_frame_num > start_frame_num) {
+    // Calculate the media time to skip (from keyframe to target frame)
+    AP4_UI64 skip_media_time = 0;
+    for (AP4_Ordinal i = start_frame_num; i < target_frame_num; i++) {
+      AP4_Sample sample;
+      if (AP4_SUCCEEDED(input_track->GetSample(i, sample))) {
+        skip_media_time += sample.GetDuration();
+      }
+    }
+
+    if (skip_media_time > 0) {
+      AP4_ContainerAtom* new_edts = new AP4_ContainerAtom(AP4_ATOM_TYPE_EDTS);
+      AP4_ElstAtom* new_elst = new AP4_ElstAtom();
+
+      // Calculate segment duration (total - skipped) in movie timescale
+      AP4_UI64 playable_duration = dts - skip_media_time;
+      AP4_UI64 segment_duration = AP4_ConvertTime(
+          playable_duration, input_track->GetMediaTimeScale(), movie_timescale);
+
+      // media_time is where to start playback (skip the pre-roll frames)
+      AP4_ElstEntry entry(segment_duration, skip_media_time, 1);
+      new_elst->AddEntry(entry);
+      new_edts->AddChild(new_elst);
+      output_track->UseTrakAtom()->AddChild(new_edts, 1);  // add after tkhd
+
+      if (debug_level > 0) {
+        fprintf(stderr,
+                "Video EDTS: media_time=%llu, segment_duration=%llu "
+                "(skipping %u frames)\n",
+                (unsigned long long)skip_media_time,
+                (unsigned long long)segment_duration,
+                target_frame_num - start_frame_num);
+      }
+    }
+  }
 
   return 0;
 }
@@ -701,7 +758,8 @@ int calculate_start_frame(AP4_Track* video_track, AP4_UI32 video_duration_ms,
 // 5. Cut audio at same timestamp
 // 6. Rewrite moov box with updated sample tables
 int mp4seek(const char* infile, const char* outfile, int debug_level,
-            float start, int64_t start_frame, int64_t start_pts) {
+            float start, int64_t start_frame, int64_t start_pts,
+            bool accurate_seek) {
   // 1. Parse file, get video track duration
   Mp4Info info;
   int result = parse_mp4_file(infile, debug_level, info);
@@ -727,8 +785,9 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
   AP4_UI32 output_duration_ms = 0;
   AP4_Cardinal output_frame_count = 0;
   result = video_track_trim_sseof(
-      info.video_track, keyframe_frame_num, info.movie->GetTimeScale(),
-      debug_level, output_video_track, output_duration_ms, output_frame_count);
+      info.video_track, keyframe_frame_num, frame_num, accurate_seek,
+      info.movie->GetTimeScale(), debug_level, output_video_track,
+      output_duration_ms, output_frame_count);
   if (result != 0) {
     return result;
   }
@@ -817,8 +876,11 @@ int main(int argc, char* argv[]) {
     if (options->start_pts != INT64_MIN) {
       fprintf(stderr, "Start PTS: %lld\n", (long long)options->start_pts);
     }
+    fprintf(stderr, "Accurate seek: %s\n",
+            options->accurate_seek ? "true" : "false");
   }
 
   return mp4seek(options->infile, options->outfile, options->debug,
-                 options->start, options->start_frame, options->start_pts);
+                 options->start, options->start_frame, options->start_pts,
+                 options->accurate_seek);
 }
