@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "config.h"
 #include "include/mp4seek.h"
 
 // Command line options
@@ -32,6 +33,7 @@ const ArgOptions DEFAULT_OPTIONS{
 };
 
 void print_usage(const char* program_name) {
+  fprintf(stderr, "%s version %s\n", PROJECT_NAME, PROJECT_VERSION);
   fprintf(stderr, "usage: %s [options] <infile> <outfile>\n", program_name);
   fprintf(stderr, "where options are:\n");
   fprintf(stderr, "\t-d, --debug:\tIncrease debug verbosity [%i]\n",
@@ -47,6 +49,7 @@ void print_usage(const char* program_name) {
   fprintf(stderr, "\t--accurate_seek:\tSeek to exact position using EDTS\n");
   fprintf(stderr,
           "\t--noaccurate_seek:\tSeek to nearest keyframe only [default]\n");
+  fprintf(stderr, "\t-v, --version:\tShow version information\n");
   fprintf(stderr, "\t-h, --help:\tShow this help message\n");
 }
 
@@ -58,6 +61,7 @@ enum {
   START_PTS_OPTION,
   ACCURATE_SEEK_OPTION,
   NOACCURATE_SEEK_OPTION,
+  VERSION_OPTION,
   HELP_OPTION,
 };
 
@@ -83,12 +87,13 @@ ArgOptions* parse_args(int argc, char** argv) {
       {"start_pts", required_argument, nullptr, START_PTS_OPTION},
       {"accurate_seek", no_argument, nullptr, ACCURATE_SEEK_OPTION},
       {"noaccurate_seek", no_argument, nullptr, NOACCURATE_SEEK_OPTION},
+      {"version", no_argument, nullptr, VERSION_OPTION},
       {"help", no_argument, nullptr, HELP_OPTION},
       {nullptr, 0, nullptr, 0}};
 
   // Parse arguments
   while (true) {
-    c = getopt_long(argc, argv, "dqh", longopts, &optindex);
+    c = getopt_long(argc, argv, "dqvh", longopts, &optindex);
     if (c == -1) {
       break;
     }
@@ -147,6 +152,11 @@ ArgOptions* parse_args(int argc, char** argv) {
       case NOACCURATE_SEEK_OPTION:
         options.accurate_seek = false;
         break;
+
+      case VERSION_OPTION:
+      case 'v':
+        fprintf(stderr, "%s version %s\n", PROJECT_NAME, PROJECT_VERSION);
+        exit(0);
 
       case HELP_OPTION:
       case 'h':
