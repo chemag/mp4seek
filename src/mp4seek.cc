@@ -1,4 +1,4 @@
-#include <getopt.h>
+#include "include/mp4seek.h"
 
 #include <climits>
 #include <cmath>
@@ -11,178 +11,6 @@
 #include <string>
 
 #include "Ap4.h"
-
-// Command line options
-// TODO(chemag): add support for --end, --end_frame, --end_pts
-struct ArgOptions {
-  int debug;
-  // TODO(chemag): add support for sexagesimal format for time
-  float start;          // Start time in seconds (NaN if not set)
-  int64_t start_frame;  // Start frame number (INT64_MIN if not set)
-  int64_t start_pts;    // Start PTS value (INT64_MIN if not set)
-  bool accurate_seek;   // If true, use EDTS to seek to exact position
-  const char* infile;
-  const char* outfile;
-};
-
-const ArgOptions DEFAULT_OPTIONS{
-    .debug = 0,
-    .start = NAN,
-    .start_frame = INT64_MIN,
-    .start_pts = INT64_MIN,
-    .accurate_seek = false,
-    .infile = nullptr,
-    .outfile = nullptr,
-};
-
-void print_usage(const char* program_name) {
-  fprintf(stderr, "usage: %s [options] <infile> <outfile>\n", program_name);
-  fprintf(stderr, "where options are:\n");
-  fprintf(stderr, "\t-d, --debug:\tIncrease debug verbosity [%i]\n",
-          DEFAULT_OPTIONS.debug);
-  fprintf(stderr, "\t-q, --quiet:\tSet debug verbosity to -1\n");
-  fprintf(stderr,
-          "\t--start <float>:\tStart time in seconds (negative = from end)\n");
-  fprintf(stderr,
-          "\t--start_frame <int>:\tStart frame number (negative = from end)\n");
-  fprintf(stderr,
-          "\t--start_pts <int>:\tStart PTS in video timescale (negative = from "
-          "end)\n");
-  fprintf(stderr, "\t--accurate_seek:\tSeek to exact position using EDTS\n");
-  fprintf(stderr,
-          "\t--noaccurate_seek:\tSeek to nearest keyframe only [default]\n");
-  fprintf(stderr, "\t-h, --help:\tShow this help message\n");
-}
-
-// Long options with no equivalent short option
-enum {
-  QUIET_OPTION = CHAR_MAX + 1,
-  START_OPTION,
-  START_FRAME_OPTION,
-  START_PTS_OPTION,
-  ACCURATE_SEEK_OPTION,
-  NOACCURATE_SEEK_OPTION,
-  HELP_OPTION,
-};
-
-ArgOptions* parse_args(int argc, char** argv) {
-  int c;
-  char* endptr;
-  static ArgOptions options;
-
-  // Set default option values
-  options = DEFAULT_OPTIONS;
-
-  // getopt_long stores the option index here
-  int optindex = 0;
-
-  // Long options
-  static struct option longopts[] = {
-      // Matching options to short options
-      {"debug", no_argument, nullptr, 'd'},
-      // Options without a short option
-      {"quiet", no_argument, nullptr, QUIET_OPTION},
-      {"start", required_argument, nullptr, START_OPTION},
-      {"start_frame", required_argument, nullptr, START_FRAME_OPTION},
-      {"start_pts", required_argument, nullptr, START_PTS_OPTION},
-      {"accurate_seek", no_argument, nullptr, ACCURATE_SEEK_OPTION},
-      {"noaccurate_seek", no_argument, nullptr, NOACCURATE_SEEK_OPTION},
-      {"help", no_argument, nullptr, HELP_OPTION},
-      {nullptr, 0, nullptr, 0}};
-
-  // Parse arguments
-  while (true) {
-    c = getopt_long(argc, argv, "dqh", longopts, &optindex);
-    if (c == -1) {
-      break;
-    }
-    switch (c) {
-      case 0:
-        // Long options that define flag
-        if (longopts[optindex].flag != nullptr) {
-          break;
-        }
-        break;
-
-      case 'd':
-        options.debug += 1;
-        break;
-
-      case 'q':
-      case QUIET_OPTION:
-        options.debug = -1;
-        break;
-
-      case START_OPTION:
-        options.start = strtof(optarg, &endptr);
-        if (*endptr != '\0') {
-          fprintf(stderr, "Error: Invalid float value for --start: %s\n",
-                  optarg);
-          print_usage(argv[0]);
-          return nullptr;
-        }
-        break;
-
-      case START_FRAME_OPTION:
-        options.start_frame = strtoll(optarg, &endptr, 10);
-        if (*endptr != '\0') {
-          fprintf(stderr,
-                  "Error: Invalid integer value for --start_frame: %s\n",
-                  optarg);
-          print_usage(argv[0]);
-          return nullptr;
-        }
-        break;
-
-      case START_PTS_OPTION:
-        options.start_pts = strtoll(optarg, &endptr, 10);
-        if (*endptr != '\0') {
-          fprintf(stderr, "Error: Invalid integer value for --start_pts: %s\n",
-                  optarg);
-          print_usage(argv[0]);
-          return nullptr;
-        }
-        break;
-
-      case ACCURATE_SEEK_OPTION:
-        options.accurate_seek = true;
-        break;
-
-      case NOACCURATE_SEEK_OPTION:
-        options.accurate_seek = false;
-        break;
-
-      case HELP_OPTION:
-      case 'h':
-        print_usage(argv[0]);
-        exit(0);
-
-      default:
-        fprintf(stderr, "Unsupported option: %c\n", c);
-        print_usage(argv[0]);
-        return nullptr;
-    }
-  }
-
-  // Get positional arguments (infile, outfile)
-  int remaining = argc - optind;
-  if (remaining < 2) {
-    fprintf(stderr, "Error: Both infile and outfile are required\n");
-    print_usage(argv[0]);
-    return nullptr;
-  }
-  if (remaining > 2) {
-    fprintf(stderr, "Error: Too many positional arguments (%d extra)\n",
-            remaining - 2);
-    print_usage(argv[0]);
-    return nullptr;
-  }
-
-  options.infile = argv[optind];
-  options.outfile = argv[optind + 1];
-
-  return &options;
-}
 
 // Parsed MP4 file info
 struct Mp4Info {
@@ -197,7 +25,7 @@ struct Mp4Info {
 
 // Parse MP4 file and extract video track info
 // Returns 0 on success, non-zero on error
-int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
+static int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
   AP4_ByteStream* input = nullptr;
   AP4_Result result = AP4_FileByteStream::Create(
       infile, AP4_FileByteStream::STREAM_MODE_READ, input);
@@ -271,7 +99,7 @@ struct EdtsInfo {
 
 // Parse EDTS from a track
 // Returns EdtsInfo with parsed values
-EdtsInfo parse_track_edts(AP4_Track* track, int debug_level) {
+static EdtsInfo parse_track_edts(AP4_Track* track, int debug_level) {
   EdtsInfo edts_info = {false, 0, 0, false, 0};
 
   const AP4_TrakAtom* trak = track->GetTrakAtom();
@@ -329,7 +157,8 @@ EdtsInfo parse_track_edts(AP4_Track* track, int debug_level) {
 }
 
 // Get the media time of a sample (in media timescale units)
-AP4_UI64 get_sample_media_time(AP4_Track* track, AP4_Ordinal sample_index) {
+static AP4_UI64 get_sample_media_time(AP4_Track* track,
+                                      AP4_Ordinal sample_index) {
   AP4_Sample sample;
   if (AP4_FAILED(track->GetSample(sample_index, sample))) {
     return 0;
@@ -340,11 +169,12 @@ AP4_UI64 get_sample_media_time(AP4_Track* track, AP4_Ordinal sample_index) {
 // Step 6: Create a trimmed audio track with EDTS
 // video_cut_media_time is the video keyframe's DTS in video timescale
 // Returns 0 on success, non-zero on error
-int audio_track_trim_sseof(AP4_Track* input_audio_track,
-                           AP4_UI64 video_cut_media_time,
-                           AP4_UI32 video_timescale, AP4_UI32 movie_timescale,
-                           int debug_level, AP4_Track*& output_track,
-                           AP4_UI64& audio_skip_samples) {
+static int audio_track_trim_sseof(AP4_Track* input_audio_track,
+                                  AP4_UI64 video_cut_media_time,
+                                  AP4_UI32 video_timescale,
+                                  AP4_UI32 movie_timescale, int debug_level,
+                                  AP4_Track*& output_track,
+                                  AP4_UI64& audio_skip_samples) {
   // Parse input audio EDTS
   EdtsInfo audio_edts = parse_track_edts(input_audio_track, debug_level);
 
@@ -566,8 +396,8 @@ int audio_track_trim_sseof(AP4_Track* input_audio_track,
 // Step 3: Find the frame at a given time
 // Returns 0 on success, non-zero on error
 // On success, frame_num contains the 0-based frame number
-int find_frame_at_time(AP4_Track* video_track, AP4_UI32 target_time_ms,
-                       int debug_level, AP4_Ordinal& frame_num) {
+static int find_frame_at_time(AP4_Track* video_track, AP4_UI32 target_time_ms,
+                              int debug_level, AP4_Ordinal& frame_num) {
   AP4_Result result =
       video_track->GetSampleIndexForTimeStampMs(target_time_ms, frame_num);
   if (AP4_FAILED(result)) {
@@ -585,8 +415,9 @@ int find_frame_at_time(AP4_Track* video_track, AP4_UI32 target_time_ms,
 
 // Step 4: Find the keyframe (sync sample) at or before a given frame
 // Returns the 0-based frame number of the keyframe
-AP4_Ordinal find_keyframe_before_frame(AP4_Track* video_track,
-                                       AP4_Ordinal frame_num, int debug_level) {
+static AP4_Ordinal find_keyframe_before_frame(AP4_Track* video_track,
+                                              AP4_Ordinal frame_num,
+                                              int debug_level) {
   AP4_Ordinal keyframe_frame_num =
       video_track->GetNearestSyncSampleIndex(frame_num, true);
 
@@ -602,12 +433,13 @@ AP4_Ordinal find_keyframe_before_frame(AP4_Track* video_track,
 // adds EDTS to skip to the target frame.
 // Returns 0 on success, non-zero on error. On success, output_track,
 // output_duration_ms, and output_frame_count are set.
-int video_track_trim_sseof(AP4_Track* input_track, AP4_Ordinal start_frame_num,
-                           AP4_Ordinal target_frame_num, bool accurate_seek,
-                           AP4_UI32 movie_timescale, int debug_level,
-                           AP4_Track*& output_track,
-                           AP4_UI32& output_duration_ms,
-                           AP4_Cardinal& output_frame_count) {
+static int video_track_trim_sseof(AP4_Track* input_track,
+                                  AP4_Ordinal start_frame_num,
+                                  AP4_Ordinal target_frame_num,
+                                  bool accurate_seek, AP4_UI32 movie_timescale,
+                                  int debug_level, AP4_Track*& output_track,
+                                  AP4_UI32& output_duration_ms,
+                                  AP4_Cardinal& output_frame_count) {
   AP4_Cardinal total_samples = input_track->GetSampleCount();
 
   // Create a synthetic sample table to hold the output samples
@@ -721,10 +553,11 @@ int video_track_trim_sseof(AP4_Track* input_track, AP4_Ordinal start_frame_num,
 // Calculate start frame from options (--start, --start_frame, or --start_pts)
 // Returns 0 on success, non-zero on error
 // On success, frame_num contains the 0-based frame number
-int calculate_start_frame(AP4_Track* video_track, AP4_UI32 video_duration_ms,
-                          AP4_UI32 video_timescale, float start,
-                          int64_t start_frame, int64_t start_pts,
-                          int debug_level, AP4_Ordinal& frame_num) {
+static int calculate_start_frame(AP4_Track* video_track,
+                                 AP4_UI32 video_duration_ms,
+                                 AP4_UI32 video_timescale, float start,
+                                 int64_t start_frame, int64_t start_pts,
+                                 int debug_level, AP4_Ordinal& frame_num) {
   AP4_Cardinal total_frames = video_track->GetSampleCount();
   int result = 0;
 
@@ -950,34 +783,4 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
   }
 
   return 0;
-}
-
-int main(int argc, char* argv[]) {
-  // Parse args
-  ArgOptions* options = parse_args(argc, argv);
-  if (options == nullptr) {
-    return 1;
-  }
-
-  // Print args
-  if (options->debug > 0) {
-    fprintf(stderr, "Input file: %s\n", options->infile);
-    fprintf(stderr, "Output file: %s\n", options->outfile);
-    fprintf(stderr, "Debug level: %d\n", options->debug);
-    if (!std::isnan(options->start)) {
-      fprintf(stderr, "Start: %.3f seconds\n", options->start);
-    }
-    if (options->start_frame != INT64_MIN) {
-      fprintf(stderr, "Start frame: %lld\n", (long long)options->start_frame);
-    }
-    if (options->start_pts != INT64_MIN) {
-      fprintf(stderr, "Start PTS: %lld\n", (long long)options->start_pts);
-    }
-    fprintf(stderr, "Accurate seek: %s\n",
-            options->accurate_seek ? "true" : "false");
-  }
-
-  return mp4seek(options->infile, options->outfile, options->debug,
-                 options->start, options->start_frame, options->start_pts,
-                 options->accurate_seek);
 }

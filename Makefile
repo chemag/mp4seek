@@ -3,7 +3,8 @@ all: none
 
 
 format:
-	clang-format -i -style=google mp4seek.cc
+	clang-format -i -style=google src/mp4seek.cc include/mp4seek.h
+	clang-format -i -style=google tools/mp4seek_main.cc
 
 .PHONY: build
 
