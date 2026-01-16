@@ -3,4 +3,4 @@
 	url = https://github.com/axiomatic-systems/Bento4.git
 [submodule "lib/mp4v2"]
 	path = lib/mp4v2
-	url = https://github.com/enzo1982/mp4v2.git
+	url = https://github.com/chemag/mp4v2
