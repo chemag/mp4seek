@@ -7,13 +7,15 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Add bento4 as a subdirectory (builds libap4)
+set(BUILD_APPS OFF CACHE BOOL "Don't build bento4 apps" FORCE)
 add_subdirectory(lib/bento4)
 
-# mp4seek library
-add_library(mp4seek_lib STATIC src/mp4seek.cc src/mp4extract.cc)
+# mp4seek library using bento4
+add_library(mp4seek_lib STATIC src/mp4seek.bento4.cc src/mp4extract.bento4.cc)
+target_link_libraries(mp4seek_lib ap4)
+
 set_target_properties(mp4seek_lib PROPERTIES OUTPUT_NAME mp4seek)
 target_include_directories(mp4seek_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(mp4seek_lib ap4)
 
 # Generate config.h with version info
 # https://cmake.org/cmake/help/latest/guide/tutorial/index.html#adding-a-version-number-and-configured-header-file

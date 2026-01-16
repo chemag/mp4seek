@@ -2,7 +2,8 @@
 
 mp4seek is a tool for trimming MP4 files at keyframe boundaries without transcoding. It performs stream copy (remux) operations, copying video NALUs and audio frames without re-encoding.
 
-mp4seek is based on [Bento4](https://github.com/axiomatic-systems/Bento4.git). The goal is to show how to use bento4 to edit ISOBMFF files.
+mp4seek supports the [Bento4](https://github.com/axiomatic-systems/Bento4) MP4 library backends.
+
 
 
 # 2. Features
@@ -26,8 +27,9 @@ mp4seek is based on [Bento4](https://github.com/axiomatic-systems/Bento4.git). T
 ```bash
 cd mp4seek
 mkdir -p build && cd build
-cmake ..
+cmake -DBUILD_TESTING=ON ..
 make
+./mp4seek_test
 ```
 
 
@@ -118,13 +120,16 @@ Add -d flags for debug output:
 
 # 7. Dependencies
 
-* Bento4 (included as git submodule in lib/bento4)
+* Bento4 (included as git submodule in lib/bento4): MP4 backend
 * CMake 3.10+
 * C++17 compiler
 
 
 # 8. Limitations
 
+## 8.1. Common Limitations
+
+* **No AAC pre-roll atoms**: SGPD/SBGP atoms are not copied, which may cause minor audio glitches at the start
 * Only processes first video and first audio track
 * Requires video track (audio-only files not supported)
 * With --noaccurate_seek, cut point is always at or before the requested position (snaps to previous keyframe)
