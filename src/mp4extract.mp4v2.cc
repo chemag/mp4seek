@@ -1,11 +1,11 @@
 #include "include/mp4extract.h"
 
+#include <mp4v2/mp4v2.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <new>
-
-#include <mp4v2/mp4v2.h>
 
 int mp4extractframes(const char* infile, int track_num, int start_frame,
                      int end_frame, Mp4Frame** out_frames,
@@ -90,7 +90,8 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
       return 1;
     }
 
-    // Allocate and copy frame data (mp4v2 allocates pBytes, we need our own copy)
+    // Allocate and copy frame data (mp4v2 allocates pBytes, we need our own
+    // copy)
     uint8_t* data = new (std::nothrow) uint8_t[numBytes];
     if (data == nullptr) {
       fprintf(stderr, "Error: failed to allocate frame data for sample %d\n",

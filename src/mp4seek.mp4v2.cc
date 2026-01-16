@@ -1,5 +1,7 @@
 #include "include/mp4seek.h"
 
+#include <mp4v2/mp4v2.h>
+
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -8,8 +10,6 @@
 #include <cstring>
 #include <new>
 #include <string>
-
-#include <mp4v2/mp4v2.h>
 
 // Parsed MP4 file info
 struct Mp4Info {
@@ -151,8 +151,7 @@ static MP4SampleId calculate_start_sample(Mp4Info& info, float start,
   MP4SampleId sampleId = MP4_INVALID_SAMPLE_ID;
 
   // Calculate video duration in milliseconds
-  uint64_t videoDurationMs =
-      (info.videoDuration * 1000) / info.videoTimescale;
+  uint64_t videoDurationMs = (info.videoDuration * 1000) / info.videoTimescale;
 
   if (!std::isnan(start)) {
     // --start: time in seconds
@@ -164,24 +163,22 @@ static MP4SampleId calculate_start_sample(Mp4Info& info, float start,
       start_ms = static_cast<int64_t>(start * 1000.0f);
     }
 
-    if (start_ms < 0 ||
-        start_ms > static_cast<int64_t>(videoDurationMs)) {
+    if (start_ms < 0 || start_ms > static_cast<int64_t>(videoDurationMs)) {
       fprintf(stderr, "Error: start time %lld ms is out of range (0-%llu ms)\n",
               (long long)start_ms, (unsigned long long)videoDurationMs);
       return 0;
     }
 
     // Convert ms to timescale
-    MP4Timestamp targetTime =
-        (start_ms * info.videoTimescale) / 1000;
+    MP4Timestamp targetTime = (start_ms * info.videoTimescale) / 1000;
 
     if (debug_level > 0) {
       fprintf(stderr, "Start time: %lld ms (PTS %llu)\n", (long long)start_ms,
               (unsigned long long)targetTime);
     }
 
-    sampleId =
-        find_sample_at_time(info.hFile, info.videoTrackId, targetTime, debug_level);
+    sampleId = find_sample_at_time(info.hFile, info.videoTrackId, targetTime,
+                                   debug_level);
 
   } else if (start_frame != INT64_MIN) {
     // --start_frame: 0-based frame number
@@ -246,15 +243,15 @@ static bool is_hevc_track(MP4FileHandle hFile, MP4TrackId trackId) {
   char path[256];
 
   // Check for hvc1 sample entry
-  snprintf(path, sizeof(path),
-           "moov.trak[%u].mdia.minf.stbl.stsd.hvc1.hvcC", trackId - 1);
+  snprintf(path, sizeof(path), "moov.trak[%u].mdia.minf.stbl.stsd.hvc1.hvcC",
+           trackId - 1);
   if (MP4HaveAtom(hFile, path)) {
     return true;
   }
 
   // Check for hev1 sample entry
-  snprintf(path, sizeof(path),
-           "moov.trak[%u].mdia.minf.stbl.stsd.hev1.hvcC", trackId - 1);
+  snprintf(path, sizeof(path), "moov.trak[%u].mdia.minf.stbl.stsd.hev1.hvcC",
+           trackId - 1);
   if (MP4HaveAtom(hFile, path)) {
     return true;
   }
@@ -265,8 +262,8 @@ static bool is_hevc_track(MP4FileHandle hFile, MP4TrackId trackId) {
 // Detect if track uses hev1 (vs hvc1) sample entry
 static bool is_hev1_track(MP4FileHandle hFile, MP4TrackId trackId) {
   char path[256];
-  snprintf(path, sizeof(path),
-           "moov.trak[%u].mdia.minf.stbl.stsd.hev1", trackId - 1);
+  snprintf(path, sizeof(path), "moov.trak[%u].mdia.minf.stbl.stsd.hev1",
+           trackId - 1);
   return MP4HaveAtom(hFile, path);
 }
 
@@ -278,8 +275,10 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
   MP4SampleId totalSamples = MP4GetTrackNumberOfSamples(srcFile, srcTrackId);
 
   // Get video properties
-  uint16_t width = static_cast<uint16_t>(MP4GetTrackVideoWidth(srcFile, srcTrackId));
-  uint16_t height = static_cast<uint16_t>(MP4GetTrackVideoHeight(srcFile, srcTrackId));
+  uint16_t width =
+      static_cast<uint16_t>(MP4GetTrackVideoWidth(srcFile, srcTrackId));
+  uint16_t height =
+      static_cast<uint16_t>(MP4GetTrackVideoHeight(srcFile, srcTrackId));
 
   // Get first sample duration as default
   MP4Duration sampleDuration = MP4GetSampleDuration(srcFile, srcTrackId, 1);
@@ -293,7 +292,8 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     const char* sampleEntry = use_hev1 ? "hev1" : "hvc1";
 
     if (debug_level > 0) {
-      fprintf(stderr, "Detected HEVC video track with %s sample entry\n", sampleEntry);
+      fprintf(stderr, "Detected HEVC video track with %s sample entry\n",
+              sampleEntry);
     }
 
     // Get HEVC profile/level from source hvcC
@@ -304,29 +304,32 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     char propPath[256];
     snprintf(propPath, sizeof(propPath),
              "mdia.minf.stbl.stsd.%s.hvcC.general_profile_idc", sampleEntry);
-    MP4GetTrackIntegerProperty(srcFile, srcTrackId, propPath, &general_profile_idc);
+    MP4GetTrackIntegerProperty(srcFile, srcTrackId, propPath,
+                               &general_profile_idc);
 
     snprintf(propPath, sizeof(propPath),
              "mdia.minf.stbl.stsd.%s.hvcC.general_level_idc", sampleEntry);
-    MP4GetTrackIntegerProperty(srcFile, srcTrackId, propPath, &general_level_idc);
+    MP4GetTrackIntegerProperty(srcFile, srcTrackId, propPath,
+                               &general_level_idc);
 
     snprintf(propPath, sizeof(propPath),
              "mdia.minf.stbl.stsd.%s.hvcC.lengthSizeMinusOne", sampleEntry);
-    MP4GetTrackIntegerProperty(srcFile, srcTrackId, propPath, &lengthSizeMinusOne);
+    MP4GetTrackIntegerProperty(srcFile, srcTrackId, propPath,
+                               &lengthSizeMinusOne);
 
     // Create HEVC track
     if (use_hev1) {
-      dstTrackId = MP4AddHEV1VideoTrack(dstFile, timescale, sampleDuration,
-                                        width, height,
-                                        static_cast<uint8_t>(general_profile_idc),
-                                        static_cast<uint8_t>(general_level_idc),
-                                        static_cast<uint8_t>(lengthSizeMinusOne));
+      dstTrackId = MP4AddHEV1VideoTrack(
+          dstFile, timescale, sampleDuration, width, height,
+          static_cast<uint8_t>(general_profile_idc),
+          static_cast<uint8_t>(general_level_idc),
+          static_cast<uint8_t>(lengthSizeMinusOne));
     } else {
-      dstTrackId = MP4AddHEVCVideoTrack(dstFile, timescale, sampleDuration,
-                                        width, height,
-                                        static_cast<uint8_t>(general_profile_idc),
-                                        static_cast<uint8_t>(general_level_idc),
-                                        static_cast<uint8_t>(lengthSizeMinusOne));
+      dstTrackId = MP4AddHEVCVideoTrack(
+          dstFile, timescale, sampleDuration, width, height,
+          static_cast<uint8_t>(general_profile_idc),
+          static_cast<uint8_t>(general_level_idc),
+          static_cast<uint8_t>(lengthSizeMinusOne));
     }
 
     if (dstTrackId != MP4_INVALID_TRACK_ID) {
@@ -336,11 +339,13 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
       // Copy profile space, tier flag
       uint64_t val64;
       snprintf(propPath, sizeof(propPath),
-               "mdia.minf.stbl.stsd.%s.hvcC.general_profile_space", sampleEntry);
+               "mdia.minf.stbl.stsd.%s.hvcC.general_profile_space",
+               sampleEntry);
       char dstPropPath[256];
       if (MP4GetTrackIntegerProperty(srcFile, srcTrackId, propPath, &val64)) {
         snprintf(dstPropPath, sizeof(dstPropPath),
-                 "mdia.minf.stbl.stsd.%s.hvcC.general_profile_space", dstSampleEntry);
+                 "mdia.minf.stbl.stsd.%s.hvcC.general_profile_space",
+                 dstSampleEntry);
         MP4SetTrackIntegerProperty(dstFile, dstTrackId, dstPropPath, val64);
       }
 
@@ -348,15 +353,20 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
                "mdia.minf.stbl.stsd.%s.hvcC.general_tier_flag", sampleEntry);
       if (MP4GetTrackIntegerProperty(srcFile, srcTrackId, propPath, &val64)) {
         snprintf(dstPropPath, sizeof(dstPropPath),
-                 "mdia.minf.stbl.stsd.%s.hvcC.general_tier_flag", dstSampleEntry);
+                 "mdia.minf.stbl.stsd.%s.hvcC.general_tier_flag",
+                 dstSampleEntry);
         MP4SetTrackIntegerProperty(dstFile, dstTrackId, dstPropPath, val64);
       }
 
-      snprintf(propPath, sizeof(propPath),
-               "mdia.minf.stbl.stsd.%s.hvcC.general_profile_compatibility_flags", sampleEntry);
+      snprintf(
+          propPath, sizeof(propPath),
+          "mdia.minf.stbl.stsd.%s.hvcC.general_profile_compatibility_flags",
+          sampleEntry);
       if (MP4GetTrackIntegerProperty(srcFile, srcTrackId, propPath, &val64)) {
-        snprintf(dstPropPath, sizeof(dstPropPath),
-                 "mdia.minf.stbl.stsd.%s.hvcC.general_profile_compatibility_flags", dstSampleEntry);
+        snprintf(
+            dstPropPath, sizeof(dstPropPath),
+            "mdia.minf.stbl.stsd.%s.hvcC.general_profile_compatibility_flags",
+            dstSampleEntry);
         MP4SetTrackIntegerProperty(dstFile, dstTrackId, dstPropPath, val64);
       }
 
@@ -364,24 +374,29 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
       uint8_t* constraintFlags = nullptr;
       uint32_t constraintFlagsSize = 0;
       snprintf(propPath, sizeof(propPath),
-               "mdia.minf.stbl.stsd.%s.hvcC.general_constraint_indicator_flags", sampleEntry);
-      if (MP4GetTrackBytesProperty(srcFile, srcTrackId, propPath, &constraintFlags, &constraintFlagsSize)) {
-        snprintf(dstPropPath, sizeof(dstPropPath),
-                 "mdia.minf.stbl.stsd.%s.hvcC.general_constraint_indicator_flags", dstSampleEntry);
-        MP4SetTrackBytesProperty(dstFile, dstTrackId, dstPropPath, constraintFlags, constraintFlagsSize);
+               "mdia.minf.stbl.stsd.%s.hvcC.general_constraint_indicator_flags",
+               sampleEntry);
+      if (MP4GetTrackBytesProperty(srcFile, srcTrackId, propPath,
+                                   &constraintFlags, &constraintFlagsSize)) {
+        snprintf(
+            dstPropPath, sizeof(dstPropPath),
+            "mdia.minf.stbl.stsd.%s.hvcC.general_constraint_indicator_flags",
+            dstSampleEntry);
+        MP4SetTrackBytesProperty(dstFile, dstTrackId, dstPropPath,
+                                 constraintFlags, constraintFlagsSize);
         free(constraintFlags);
       }
 
       // Copy other integer properties
       const char* intProps[] = {
-        "chromaFormat", "bitDepthLumaMinus8", "bitDepthChromaMinus8",
-        "avgFrameRate", "constantFrameRate", "numTemporalLayers",
-        "temporalIdNested", "min_spatial_segmentation_idc", "parallelismType",
-        "numOfArrays"
-      };
+          "chromaFormat",         "bitDepthLumaMinus8",
+          "bitDepthChromaMinus8", "avgFrameRate",
+          "constantFrameRate",    "numTemporalLayers",
+          "temporalIdNested",     "min_spatial_segmentation_idc",
+          "parallelismType",      "numOfArrays"};
       for (const char* prop : intProps) {
-        snprintf(propPath, sizeof(propPath),
-                 "mdia.minf.stbl.stsd.%s.hvcC.%s", sampleEntry, prop);
+        snprintf(propPath, sizeof(propPath), "mdia.minf.stbl.stsd.%s.hvcC.%s",
+                 sampleEntry, prop);
         if (MP4GetTrackIntegerProperty(srcFile, srcTrackId, propPath, &val64)) {
           snprintf(dstPropPath, sizeof(dstPropPath),
                    "mdia.minf.stbl.stsd.%s.hvcC.%s", dstSampleEntry, prop);
@@ -394,10 +409,12 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
       uint32_t nalArraysDataSize = 0;
       snprintf(propPath, sizeof(propPath),
                "mdia.minf.stbl.stsd.%s.hvcC.nalArraysData", sampleEntry);
-      if (MP4GetTrackBytesProperty(srcFile, srcTrackId, propPath, &nalArraysData, &nalArraysDataSize)) {
+      if (MP4GetTrackBytesProperty(srcFile, srcTrackId, propPath,
+                                   &nalArraysData, &nalArraysDataSize)) {
         snprintf(dstPropPath, sizeof(dstPropPath),
                  "mdia.minf.stbl.stsd.%s.hvcC.nalArraysData", dstSampleEntry);
-        MP4SetTrackBytesProperty(dstFile, dstTrackId, dstPropPath, nalArraysData, nalArraysDataSize);
+        MP4SetTrackBytesProperty(dstFile, dstTrackId, dstPropPath,
+                                 nalArraysData, nalArraysDataSize);
         free(nalArraysData);
       }
     }
@@ -413,9 +430,9 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     MP4GetTrackESConfiguration(srcFile, srcTrackId, &esConfig, &esConfigSize);
 
     // Create H.264 video track
-    dstTrackId =
-        MP4AddH264VideoTrack(dstFile, timescale, sampleDuration, width, height,
-                             0, 0, 0, 3);  // Simplified - we'll set SPS/PPS separately
+    dstTrackId = MP4AddH264VideoTrack(
+        dstFile, timescale, sampleDuration, width, height, 0, 0, 0,
+        3);  // Simplified - we'll set SPS/PPS separately
 
     if (dstTrackId == MP4_INVALID_TRACK_ID) {
       // Fallback to generic video track
@@ -424,7 +441,8 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     }
 
     // Set ES configuration if available
-    if (dstTrackId != MP4_INVALID_TRACK_ID && esConfig != nullptr && esConfigSize > 0) {
+    if (dstTrackId != MP4_INVALID_TRACK_ID && esConfig != nullptr &&
+        esConfigSize > 0) {
       MP4SetTrackESConfiguration(dstFile, dstTrackId, esConfig, esConfigSize);
     }
     if (esConfig != nullptr) {
@@ -446,9 +464,9 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     MP4Duration renderingOffset = 0;
     bool isSyncSample = false;
 
-    bool success = MP4ReadSample(srcFile, srcTrackId, s, &pBytes, &numBytes,
-                                 nullptr, &duration, &renderingOffset,
-                                 &isSyncSample);
+    bool success =
+        MP4ReadSample(srcFile, srcTrackId, s, &pBytes, &numBytes, nullptr,
+                      &duration, &renderingOffset, &isSyncSample);
     if (!success || pBytes == nullptr) {
       fprintf(stderr, "Error: could not read video sample %u\n", s);
       return MP4_INVALID_TRACK_ID;
@@ -483,8 +501,7 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
   MP4SampleId totalSamples = MP4GetTrackNumberOfSamples(srcFile, srcTrackId);
 
   // Convert video cut time to audio timescale
-  MP4Timestamp audioCutTime =
-      (videoCutTime * audioTimescale) / videoTimescale;
+  MP4Timestamp audioCutTime = (videoCutTime * audioTimescale) / videoTimescale;
 
   // Find audio sample at this time
   MP4SampleId startSample =
@@ -494,7 +511,8 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
   }
 
   if (debug_level > 0) {
-    fprintf(stderr, "Audio cut time: %llu (audio timescale), starting at sample %u\n",
+    fprintf(stderr,
+            "Audio cut time: %llu (audio timescale), starting at sample %u\n",
             (unsigned long long)audioCutTime, startSample);
   }
 
@@ -502,9 +520,8 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
   MP4Duration sampleDuration = MP4GetSampleDuration(srcFile, srcTrackId, 1);
 
   // Create audio track
-  MP4TrackId dstTrackId =
-      MP4AddAudioTrack(dstFile, audioTimescale, sampleDuration,
-                       MP4_MPEG4_AUDIO_TYPE);
+  MP4TrackId dstTrackId = MP4AddAudioTrack(
+      dstFile, audioTimescale, sampleDuration, MP4_MPEG4_AUDIO_TYPE);
 
   if (dstTrackId == MP4_INVALID_TRACK_ID) {
     fprintf(stderr, "Error: could not create audio track\n");
@@ -520,8 +537,8 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     free(esConfig);
   }
 
-  // Calculate skip duration for edit list (difference between audio sample start
-  // and actual video cut point)
+  // Calculate skip duration for edit list (difference between audio sample
+  // start and actual video cut point)
   MP4Timestamp audioSampleStartTime =
       MP4GetSampleTime(srcFile, srcTrackId, startSample);
   MP4Duration skipDuration = 0;
@@ -544,8 +561,8 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     }
 
     // Audio samples are always sync samples
-    success = MP4WriteSample(dstFile, dstTrackId, pBytes, numBytes, duration,
-                             0, true);
+    success = MP4WriteSample(dstFile, dstTrackId, pBytes, numBytes, duration, 0,
+                             true);
     free(pBytes);
 
     if (!success) {
@@ -567,8 +584,8 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     MP4Duration totalDuration = MP4GetTrackDuration(dstFile, dstTrackId);
 
     // Add edit: start at skipDuration, play for (totalDuration - skipDuration)
-    MP4AddTrackEdit(dstFile, dstTrackId, MP4_INVALID_EDIT_ID,
-                    skipDuration, totalDuration - skipDuration, false);
+    MP4AddTrackEdit(dstFile, dstTrackId, MP4_INVALID_EDIT_ID, skipDuration,
+                    totalDuration - skipDuration, false);
 
     if (debug_level > 0) {
       fprintf(stderr, "Audio EDTS: media_time=%llu, duration=%llu\n",
@@ -646,11 +663,15 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
   if (debug_level >= 0) {
     MP4FileHandle checkFile = MP4Read(outfile);
     if (checkFile != MP4_INVALID_FILE_HANDLE) {
-      MP4TrackId checkVideoTrack = MP4FindTrackId(checkFile, 0, MP4_VIDEO_TRACK_TYPE);
+      MP4TrackId checkVideoTrack =
+          MP4FindTrackId(checkFile, 0, MP4_VIDEO_TRACK_TYPE);
       if (checkVideoTrack != MP4_INVALID_TRACK_ID) {
-        MP4SampleId outSamples = MP4GetTrackNumberOfSamples(checkFile, checkVideoTrack);
-        MP4Duration outDuration = MP4GetTrackDuration(checkFile, checkVideoTrack);
-        uint32_t outTimescale = MP4GetTrackTimeScale(checkFile, checkVideoTrack);
+        MP4SampleId outSamples =
+            MP4GetTrackNumberOfSamples(checkFile, checkVideoTrack);
+        MP4Duration outDuration =
+            MP4GetTrackDuration(checkFile, checkVideoTrack);
+        uint32_t outTimescale =
+            MP4GetTrackTimeScale(checkFile, checkVideoTrack);
         uint64_t outDurationMs = (outDuration * 1000) / outTimescale;
         fprintf(stderr, "Wrote %s (%llu ms, %u frames)\n", outfile,
                 (unsigned long long)outDurationMs, outSamples);

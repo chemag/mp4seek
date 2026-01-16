@@ -2,8 +2,9 @@
 
 mp4seek is a tool for trimming MP4 files at keyframe boundaries without transcoding. It performs stream copy (remux) operations, copying video NALUs and audio frames without re-encoding.
 
-mp4seek supports the [Bento4](https://github.com/axiomatic-systems/Bento4) MP4 library backends.
-
+mp4seek supports two MP4 library backends:
+* [Bento4](https://github.com/axiomatic-systems/Bento4) (default)
+* [mp4v2](https://github.com/enzo1982/mp4v2)
 
 
 # 2. Features
@@ -24,10 +25,34 @@ mp4seek supports the [Bento4](https://github.com/axiomatic-systems/Bento4) MP4 l
 
 # 3. Build Instructions
 
+## 3.1. Build with Bento4 (default)
+
 ```bash
 cd mp4seek
 mkdir -p build && cd build
-cmake -DBUILD_TESTING=ON ..
+cmake ..
+make
+```
+
+## 3.2. Build with mp4v2
+
+```bash
+cd mp4seek
+mkdir -p build && cd build
+cmake -DUSE_MP4V2=ON ..
+make
+```
+
+## 3.3. Build Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `USE_MP4V2` | OFF | Use mp4v2 library instead of Bento4 |
+| `BUILD_TESTING` | OFF | Build unit tests (requires googletest) |
+
+Example with tests enabled:
+```bash
+cmake -DUSE_MP4V2=ON -DBUILD_TESTING=ON ..
 make
 ./mp4seek_test
 ```
@@ -120,7 +145,8 @@ Add -d flags for debug output:
 
 # 7. Dependencies
 
-* Bento4 (included as git submodule in lib/bento4): MP4 backend
+* Bento4 (included as git submodule in lib/bento4) - default backend
+* mp4v2 (included as git submodule in lib/mp4v2) - alternative backend
 * CMake 3.10+
 * C++17 compiler
 
@@ -134,6 +160,14 @@ Add -d flags for debug output:
 * Requires video track (audio-only files not supported)
 * With --noaccurate_seek, cut point is always at or before the requested position (snaps to previous keyframe)
 * With --accurate_seek (default), video starts at exact position via EDTS but includes pre-roll frames from keyframe
+
+## 8.2. Bento4 Backend Limitations
+
+* Supports H.264/AVC and H.265/HEVC video tracks
+
+## 8.3. mp4v2 Backend Limitations
+
+* Supports H.264/AVC and H.265/HEVC video tracks (HEVC support added in this fork)
 
 
 # Appendix 1. Atom Ordering (Fast Start)

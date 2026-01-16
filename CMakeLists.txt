@@ -6,13 +6,35 @@ project(mp4seek VERSION 0.1)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Add bento4 as a subdirectory (builds libap4)
-set(BUILD_APPS OFF CACHE BOOL "Don't build bento4 apps" FORCE)
-add_subdirectory(lib/bento4)
+# Option to select MP4 library backend
+# USE_MP4V2=ON  -> Use mp4v2 library
+# USE_MP4V2=OFF -> Use Bento4 library (default)
+option(USE_MP4V2 "Use mp4v2 library instead of Bento4" OFF)
 
-# mp4seek library using bento4
-add_library(mp4seek_lib STATIC src/mp4seek.bento4.cc src/mp4extract.bento4.cc)
-target_link_libraries(mp4seek_lib ap4)
+if(USE_MP4V2)
+  message(STATUS "Using mp4v2 library")
+
+  # Add mp4v2 as a subdirectory (builds libmp4v2)
+  set(BUILD_SHARED OFF CACHE BOOL "Build mp4v2 as static library" FORCE)
+  set(BUILD_UTILS OFF CACHE BOOL "Don't build mp4v2 utilities" FORCE)
+  add_subdirectory(lib/mp4v2)
+
+  # mp4seek library using mp4v2
+  add_library(mp4seek_lib STATIC src/mp4seek.mp4v2.cc src/mp4extract.mp4v2.cc)
+  target_link_libraries(mp4seek_lib mp4v2)
+
+else()
+  message(STATUS "Using Bento4 library")
+
+  # Add bento4 as a subdirectory (builds libap4)
+  set(BUILD_APPS OFF CACHE BOOL "Don't build bento4 apps" FORCE)
+  add_subdirectory(lib/bento4)
+
+  # mp4seek library using bento4
+  add_library(mp4seek_lib STATIC src/mp4seek.bento4.cc src/mp4extract.bento4.cc)
+  target_link_libraries(mp4seek_lib ap4)
+
+endif()
 
 set_target_properties(mp4seek_lib PROPERTIES OUTPUT_NAME mp4seek)
 target_include_directories(mp4seek_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
