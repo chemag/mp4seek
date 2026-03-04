@@ -5,13 +5,14 @@
 #include <cstring>
 
 #include "Ap4.h"
+#include "include/mp4seek_log.h"
 
 int mp4extractframes(const char* infile, int track_num, int start_frame,
                      int end_frame, Mp4Frame** out_frames,
                      int* out_frame_count) {
   // Validate output parameters
   if (out_frames == nullptr || out_frame_count == nullptr) {
-    fprintf(stderr, "Error: output parameters cannot be null\n");
+    MP4SEEK_LOGE("Error: output parameters cannot be null");
     return 1;
   }
 
@@ -23,7 +24,7 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
   AP4_Result result = AP4_FileByteStream::Create(
       infile, AP4_FileByteStream::STREAM_MODE_READ, input);
   if (AP4_FAILED(result)) {
-    fprintf(stderr, "Error: cannot open input file: %s\n", infile);
+    MP4SEEK_LOGE("Error: cannot open input file: %s", infile);
     return 1;
   }
 
@@ -32,20 +33,20 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
 
   AP4_Movie* movie = file.GetMovie();
   if (movie == nullptr) {
-    fprintf(stderr, "Error: no movie found in file\n");
+    MP4SEEK_LOGE("Error: no movie found in file");
     return 1;
   }
 
   // Find the requested track (1-based index)
   AP4_Track* track = movie->GetTrack(static_cast<AP4_UI32>(track_num));
   if (track == nullptr) {
-    fprintf(stderr, "Error: track %d not found\n", track_num);
+    MP4SEEK_LOGE("Error: track %d not found", track_num);
     return 1;
   }
 
   AP4_Cardinal total_samples = track->GetSampleCount();
   if (total_samples == 0) {
-    fprintf(stderr, "Error: track %d has no samples\n", track_num);
+    MP4SEEK_LOGE("Error: track %d has no samples", track_num);
     return 1;
   }
 
@@ -57,7 +58,7 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
     end_frame = static_cast<int>(total_samples) - 1;
   }
   if (start_frame > end_frame) {
-    fprintf(stderr, "Error: start_frame (%d) > end_frame (%d)\n", start_frame,
+    MP4SEEK_LOGE("Error: start_frame (%d) > end_frame (%d)", start_frame,
             end_frame);
     return 1;
   }
@@ -67,7 +68,7 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
   // Allocate frame array
   Mp4Frame* frames = new (std::nothrow) Mp4Frame[frame_count];
   if (frames == nullptr) {
-    fprintf(stderr, "Error: failed to allocate frame array\n");
+    MP4SEEK_LOGE("Error: failed to allocate frame array");
     return 1;
   }
 
@@ -84,7 +85,7 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
 
     result = track->GetSample(sample_index, sample);
     if (AP4_FAILED(result)) {
-      fprintf(stderr, "Error: could not get sample %d\n", sample_index);
+      MP4SEEK_LOGE("Error: could not get sample %d", sample_index);
       mp4extractframes_free(frames, frame_count);
       return 1;
     }
@@ -92,7 +93,7 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
     AP4_DataBuffer sample_data;
     result = sample.ReadData(sample_data);
     if (AP4_FAILED(result)) {
-      fprintf(stderr, "Error: could not read sample data for sample %d\n",
+      MP4SEEK_LOGE("Error: could not read sample data for sample %d",
               sample_index);
       mp4extractframes_free(frames, frame_count);
       return 1;
@@ -102,7 +103,7 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
     size_t data_size = sample_data.GetDataSize();
     uint8_t* data = new (std::nothrow) uint8_t[data_size];
     if (data == nullptr) {
-      fprintf(stderr, "Error: failed to allocate frame data for sample %d\n",
+      MP4SEEK_LOGE("Error: failed to allocate frame data for sample %d",
               sample_index);
       mp4extractframes_free(frames, frame_count);
       return 1;

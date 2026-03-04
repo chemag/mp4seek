@@ -11,6 +11,7 @@
 #include <string>
 
 #include "Ap4.h"
+#include "include/mp4seek_log.h"
 
 // Parsed MP4 file info
 struct Mp4Info {
@@ -30,7 +31,7 @@ static int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
   AP4_Result result = AP4_FileByteStream::Create(
       infile, AP4_FileByteStream::STREAM_MODE_READ, input);
   if (AP4_FAILED(result)) {
-    fprintf(stderr, "Error: cannot open input file: %s\n", infile);
+    MP4SEEK_LOGE("Error: cannot open input file: %s", infile);
     return 1;
   }
 
@@ -39,7 +40,7 @@ static int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
 
   info.movie = info.file->GetMovie();
   if (info.movie == nullptr) {
-    fprintf(stderr, "Error: no movie found in file\n");
+    MP4SEEK_LOGE("Error: no movie found in file");
     return 1;
   }
 
@@ -60,7 +61,7 @@ static int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
   }
 
   if (info.video_track == nullptr) {
-    fprintf(stderr, "Error: no video track found\n");
+    MP4SEEK_LOGE("Error: no video track found");
     return 1;
   }
 
@@ -70,18 +71,18 @@ static int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
       info.audio_track ? info.audio_track->GetMediaTimeScale() : 0;
 
   if (debug_level > 0) {
-    fprintf(stderr, "Video track ID: %d\n", info.video_track->GetId());
-    fprintf(stderr, "Video duration: %u ms\n", info.video_duration_ms);
-    fprintf(stderr, "Video timescale: %u\n", info.video_timescale);
-    fprintf(stderr, "Video sample count: %u\n",
+    MP4SEEK_LOGD("Video track ID: %d", info.video_track->GetId());
+    MP4SEEK_LOGD("Video duration: %u ms", info.video_duration_ms);
+    MP4SEEK_LOGD("Video timescale: %u", info.video_timescale);
+    MP4SEEK_LOGD("Video sample count: %u",
             info.video_track->GetSampleCount());
     if (info.audio_track) {
-      fprintf(stderr, "Audio track ID: %d\n", info.audio_track->GetId());
-      fprintf(stderr, "Audio timescale: %u\n", info.audio_timescale);
-      fprintf(stderr, "Audio sample count: %u\n",
+      MP4SEEK_LOGD("Audio track ID: %d", info.audio_track->GetId());
+      MP4SEEK_LOGD("Audio timescale: %u", info.audio_timescale);
+      MP4SEEK_LOGD("Audio sample count: %u",
               info.audio_track->GetSampleCount());
     } else {
-      fprintf(stderr, "No audio track found\n");
+      MP4SEEK_LOGD("No audio track found");
     }
   }
 
@@ -143,14 +144,16 @@ static EdtsInfo parse_track_edts(AP4_Track* track, int debug_level) {
   }
 
   if (debug_level > 1) {
-    fprintf(stderr, "  EDTS: media_time=%lld, segment_duration=%llu",
-            (long long)edts_info.media_time,
-            (unsigned long long)edts_info.segment_duration);
     if (edts_info.has_empty_edit) {
-      fprintf(stderr, ", empty_duration=%llu",
+      MP4SEEK_LOGD("  EDTS: media_time=%lld, segment_duration=%llu, empty_duration=%llu",
+              (long long)edts_info.media_time,
+              (unsigned long long)edts_info.segment_duration,
               (unsigned long long)edts_info.empty_duration);
+    } else {
+      MP4SEEK_LOGD("  EDTS: media_time=%lld, segment_duration=%llu",
+              (long long)edts_info.media_time,
+              (unsigned long long)edts_info.segment_duration);
     }
-    fprintf(stderr, "\n");
   }
 
   return edts_info;
@@ -193,7 +196,7 @@ static int audio_track_trim_sseof(AP4_Track* input_audio_track,
   }
 
   if (debug_level > 1) {
-    fprintf(stderr, "Audio cut time: %llu (audio timescale %u)\n",
+    MP4SEEK_LOGD("Audio cut time: %llu (audio timescale %u)",
             (unsigned long long)audio_cut_time, audio_timescale);
   }
 
@@ -221,7 +224,7 @@ static int audio_track_trim_sseof(AP4_Track* input_audio_track,
   }
 
   if (debug_level > 0) {
-    fprintf(stderr, "Audio: starting at sample %u, skip %llu samples in EDTS\n",
+    MP4SEEK_LOGD("Audio: starting at sample %u, skip %llu samples in EDTS",
             audio_start_sample, (unsigned long long)audio_skip_samples);
   }
 
@@ -234,7 +237,7 @@ static int audio_track_trim_sseof(AP4_Track* input_audio_track,
     AP4_SampleDescription* sample_desc =
         input_audio_track->GetSampleDescription(i);
     if (sample_desc == nullptr) {
-      fprintf(stderr, "Error: invalid audio sample description\n");
+      MP4SEEK_LOGE("Error: invalid audio sample description");
       delete sample_table;
       return 1;
     }
@@ -248,14 +251,14 @@ static int audio_track_trim_sseof(AP4_Track* input_audio_track,
     AP4_Sample sample;
     result = input_audio_track->GetSample(i, sample);
     if (AP4_FAILED(result)) {
-      fprintf(stderr, "Error: could not get audio sample %u\n", i);
+      MP4SEEK_LOGE("Error: could not get audio sample %u", i);
       delete sample_table;
       return 1;
     }
 
     AP4_ByteStream* sample_stream = sample.GetDataStream();
     if (sample_stream == nullptr) {
-      fprintf(stderr, "Error: could not get audio sample data stream %u\n", i);
+      MP4SEEK_LOGE("Error: could not get audio sample data stream %u", i);
       delete sample_table;
       return 1;
     }
@@ -275,7 +278,7 @@ static int audio_track_trim_sseof(AP4_Track* input_audio_track,
       static_cast<AP4_UI32>(AP4_ConvertTime(dts, audio_timescale, 1000));
 
   if (debug_level > 0) {
-    fprintf(stderr, "Trimmed audio: samples %u-%u (%u samples), %u ms\n",
+    MP4SEEK_LOGD("Trimmed audio: samples %u-%u (%u samples), %u ms",
             audio_start_sample, total_samples - 1, output_sample_count,
             output_duration_ms);
   }
@@ -308,7 +311,7 @@ static int audio_track_trim_sseof(AP4_Track* input_audio_track,
     output_track->UseTrakAtom()->AddChild(new_edts, 1);  // add after tkhd
 
     if (debug_level > 0) {
-      fprintf(stderr, "Audio EDTS: media_time=%llu, segment_duration=%llu\n",
+      MP4SEEK_LOGD("Audio EDTS: media_time=%llu, segment_duration=%llu",
               (unsigned long long)audio_skip_samples,
               (unsigned long long)segment_duration);
     }
@@ -401,13 +404,13 @@ static int find_frame_at_time(AP4_Track* video_track, AP4_UI32 target_time_ms,
   AP4_Result result =
       video_track->GetSampleIndexForTimeStampMs(target_time_ms, frame_num);
   if (AP4_FAILED(result)) {
-    fprintf(stderr, "Error: could not find frame at time %u ms\n",
+    MP4SEEK_LOGE("Error: could not find frame at time %u ms",
             target_time_ms);
     return 1;
   }
 
   if (debug_level > 0) {
-    fprintf(stderr, "Frame at target time: %u\n", frame_num);
+    MP4SEEK_LOGD("Frame at target time: %u", frame_num);
   }
 
   return 0;
@@ -422,7 +425,7 @@ static AP4_Ordinal find_keyframe_before_frame(AP4_Track* video_track,
       video_track->GetNearestSyncSampleIndex(frame_num, true);
 
   if (debug_level > 0) {
-    fprintf(stderr, "Keyframe before target: frame %u\n", keyframe_frame_num);
+    MP4SEEK_LOGD("Keyframe before target: frame %u", keyframe_frame_num);
   }
 
   return keyframe_frame_num;
@@ -449,7 +452,7 @@ static int video_track_trim_sseof(AP4_Track* input_track,
   for (unsigned int i = 0; i < input_track->GetSampleDescriptionCount(); i++) {
     AP4_SampleDescription* sample_desc = input_track->GetSampleDescription(i);
     if (sample_desc == nullptr) {
-      fprintf(stderr, "Error: invalid sample description\n");
+      MP4SEEK_LOGE("Error: invalid sample description");
       delete sample_table;
       return 1;
     }
@@ -463,7 +466,7 @@ static int video_track_trim_sseof(AP4_Track* input_track,
     AP4_Sample sample;
     AP4_Result result = input_track->GetSample(i, sample);
     if (AP4_FAILED(result)) {
-      fprintf(stderr, "Error: could not get sample %u\n", i);
+      MP4SEEK_LOGE("Error: could not get sample %u", i);
       delete sample_table;
       return 1;
     }
@@ -471,7 +474,7 @@ static int video_track_trim_sseof(AP4_Track* input_track,
     // Get sample data stream
     AP4_ByteStream* sample_stream = sample.GetDataStream();
     if (sample_stream == nullptr) {
-      fprintf(stderr, "Error: could not get sample data stream for sample %u\n",
+      MP4SEEK_LOGE("Error: could not get sample data stream for sample %u",
               i);
       delete sample_table;
       return 1;
@@ -493,7 +496,7 @@ static int video_track_trim_sseof(AP4_Track* input_track,
       AP4_ConvertTime(dts, input_track->GetMediaTimeScale(), 1000));
 
   if (debug_level > 0) {
-    fprintf(stderr, "Trimmed video: frames %u-%u (%u frames), %u ms\n",
+    MP4SEEK_LOGD("Trimmed video: frames %u-%u (%u frames), %u ms",
             start_frame_num, total_samples - 1, output_frame_count,
             output_duration_ms);
   }
@@ -537,9 +540,9 @@ static int video_track_trim_sseof(AP4_Track* input_track,
       output_track->UseTrakAtom()->AddChild(new_edts, 1);  // add after tkhd
 
       if (debug_level > 0) {
-        fprintf(stderr,
+        MP4SEEK_LOGD(
                 "Video EDTS: media_time=%llu, segment_duration=%llu "
-                "(skipping %u frames)\n",
+                "(skipping %u frames)",
                 (unsigned long long)skip_media_time,
                 (unsigned long long)segment_duration,
                 target_frame_num - start_frame_num);
@@ -574,13 +577,13 @@ static int calculate_start_frame(AP4_Track* video_track,
     }
 
     if (start_ms < 0 || start_ms > static_cast<int64_t>(video_duration_ms)) {
-      fprintf(stderr, "Error: start time %lld ms is out of range (0-%u ms)\n",
+      MP4SEEK_LOGE("Error: start time %lld ms is out of range (0-%u ms)",
               (long long)start_ms, video_duration_ms);
       return 1;
     }
 
     if (debug_level > 0) {
-      fprintf(stderr, "Start time: %lld ms (from --start %.3f)\n",
+      MP4SEEK_LOGD("Start time: %lld ms (from --start %.3f)",
               (long long)start_ms, start);
     }
 
@@ -602,7 +605,7 @@ static int calculate_start_frame(AP4_Track* video_track,
     }
 
     if (frame < 0 || frame >= static_cast<int64_t>(total_frames)) {
-      fprintf(stderr, "Error: start frame %lld is out of range (0-%u)\n",
+      MP4SEEK_LOGE("Error: start frame %lld is out of range (0-%u)",
               (long long)frame, total_frames - 1);
       return 1;
     }
@@ -610,7 +613,7 @@ static int calculate_start_frame(AP4_Track* video_track,
     frame_num = static_cast<AP4_Ordinal>(frame);
 
     if (debug_level > 0) {
-      fprintf(stderr, "Start frame: %u (from --start_frame %lld)\n", frame_num,
+      MP4SEEK_LOGD("Start frame: %u (from --start_frame %lld)", frame_num,
               (long long)start_frame);
     }
 
@@ -629,7 +632,7 @@ static int calculate_start_frame(AP4_Track* video_track,
     }
 
     if (pts < 0 || pts > static_cast<int64_t>(total_duration_pts)) {
-      fprintf(stderr, "Error: start PTS %lld is out of range (0-%llu)\n",
+      MP4SEEK_LOGE("Error: start PTS %lld is out of range (0-%llu)",
               (long long)pts, (unsigned long long)total_duration_pts);
       return 1;
     }
@@ -639,7 +642,7 @@ static int calculate_start_frame(AP4_Track* video_track,
         static_cast<AP4_UI32>(AP4_ConvertTime(pts, video_timescale, 1000));
 
     if (debug_level > 0) {
-      fprintf(stderr, "Start PTS: %lld (from --start_pts %lld) = %u ms\n",
+      MP4SEEK_LOGD("Start PTS: %lld (from --start_pts %lld) = %u ms",
               (long long)pts, (long long)start_pts, target_ms);
     }
 
@@ -649,9 +652,8 @@ static int calculate_start_frame(AP4_Track* video_track,
     }
 
   } else {
-    fprintf(
-        stderr,
-        "Error: one of --start, --start_frame, or --start_pts is required\n");
+    MP4SEEK_LOGE(
+        "Error: one of --start, --start_frame, or --start_pts is required");
     return 1;
   }
 
@@ -709,7 +711,7 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
         get_sample_media_time(info.video_track, keyframe_frame_num);
 
     if (debug_level > 0) {
-      fprintf(stderr, "Video cut media time: %llu (timescale %u)\n",
+      MP4SEEK_LOGD("Video cut media time: %llu (timescale %u)",
               (unsigned long long)video_cut_media_time, info.video_timescale);
     }
 
@@ -769,7 +771,7 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
   AP4_Result ap4_result = AP4_FileByteStream::Create(
       outfile, AP4_FileByteStream::STREAM_MODE_WRITE, output_stream);
   if (AP4_FAILED(ap4_result)) {
-    fprintf(stderr, "Error: cannot open output file: %s\n", outfile);
+    MP4SEEK_LOGE("Error: cannot open output file: %s", outfile);
     return 1;
   }
 
@@ -778,7 +780,7 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
   output_stream->Release();
 
   if (debug_level >= 0) {
-    fprintf(stderr, "Wrote %s (%u ms, %u frames)\n", outfile,
+    MP4SEEK_LOGI("Wrote %s (%u ms, %u frames)", outfile,
             output_duration_ms, output_frame_count);
   }
 

@@ -11,6 +11,8 @@
 #include <new>
 #include <string>
 
+#include "include/mp4seek_log.h"
+
 // Parsed MP4 file info
 struct Mp4Info {
   MP4FileHandle hFile;
@@ -28,7 +30,7 @@ struct Mp4Info {
 static int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
   info.hFile = MP4Read(infile);
   if (info.hFile == MP4_INVALID_FILE_HANDLE) {
-    fprintf(stderr, "Error: cannot open input file: %s\n", infile);
+    MP4SEEK_LOGE("Error: cannot open input file: %s", infile);
     return 1;
   }
 
@@ -53,7 +55,7 @@ static int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
   }
 
   if (info.videoTrackId == MP4_INVALID_TRACK_ID) {
-    fprintf(stderr, "Error: no video track found\n");
+    MP4SEEK_LOGE("Error: no video track found");
     MP4Close(info.hFile);
     return 1;
   }
@@ -74,16 +76,16 @@ static int parse_mp4_file(const char* infile, int debug_level, Mp4Info& info) {
   }
 
   if (debug_level > 0) {
-    fprintf(stderr, "Video track ID: %d\n", info.videoTrackId);
-    fprintf(stderr, "Video duration: %llu (timescale %u)\n",
+    MP4SEEK_LOGD("Video track ID: %d", info.videoTrackId);
+    MP4SEEK_LOGD("Video duration: %llu (timescale %u)",
             (unsigned long long)info.videoDuration, info.videoTimescale);
-    fprintf(stderr, "Video sample count: %u\n", info.videoSampleCount);
+    MP4SEEK_LOGD("Video sample count: %u", info.videoSampleCount);
     if (info.audioTrackId != MP4_INVALID_TRACK_ID) {
-      fprintf(stderr, "Audio track ID: %d\n", info.audioTrackId);
-      fprintf(stderr, "Audio timescale: %u\n", info.audioTimescale);
-      fprintf(stderr, "Audio sample count: %u\n", info.audioSampleCount);
+      MP4SEEK_LOGD("Audio track ID: %d", info.audioTrackId);
+      MP4SEEK_LOGD("Audio timescale: %u", info.audioTimescale);
+      MP4SEEK_LOGD("Audio sample count: %u", info.audioSampleCount);
     } else {
-      fprintf(stderr, "No audio track found\n");
+      MP4SEEK_LOGD("No audio track found");
     }
   }
 
@@ -136,7 +138,7 @@ static MP4SampleId find_keyframe_before_sample(MP4FileHandle hFile,
   }
 
   if (debug_level > 0) {
-    fprintf(stderr, "Keyframe before sample %u: sample %u (0-based frame %u)\n",
+    MP4SEEK_LOGD("Keyframe before sample %u: sample %u (0-based frame %u)",
             sampleId, syncSampleId, syncSampleId - 1);
   }
 
@@ -164,7 +166,7 @@ static MP4SampleId calculate_start_sample(Mp4Info& info, float start,
     }
 
     if (start_ms < 0 || start_ms > static_cast<int64_t>(videoDurationMs)) {
-      fprintf(stderr, "Error: start time %lld ms is out of range (0-%llu ms)\n",
+      MP4SEEK_LOGE("Error: start time %lld ms is out of range (0-%llu ms)",
               (long long)start_ms, (unsigned long long)videoDurationMs);
       return 0;
     }
@@ -173,7 +175,7 @@ static MP4SampleId calculate_start_sample(Mp4Info& info, float start,
     MP4Timestamp targetTime = (start_ms * info.videoTimescale) / 1000;
 
     if (debug_level > 0) {
-      fprintf(stderr, "Start time: %lld ms (PTS %llu)\n", (long long)start_ms,
+      MP4SEEK_LOGD("Start time: %lld ms (PTS %llu)", (long long)start_ms,
               (unsigned long long)targetTime);
     }
 
@@ -190,7 +192,7 @@ static MP4SampleId calculate_start_sample(Mp4Info& info, float start,
     }
 
     if (frame < 0 || frame >= static_cast<int64_t>(info.videoSampleCount)) {
-      fprintf(stderr, "Error: start frame %lld is out of range (0-%u)\n",
+      MP4SEEK_LOGE("Error: start frame %lld is out of range (0-%u)",
               (long long)frame, info.videoSampleCount - 1);
       return 0;
     }
@@ -199,7 +201,7 @@ static MP4SampleId calculate_start_sample(Mp4Info& info, float start,
     sampleId = static_cast<MP4SampleId>(frame + 1);
 
     if (debug_level > 0) {
-      fprintf(stderr, "Start frame: %lld (sample ID %u)\n", (long long)frame,
+      MP4SEEK_LOGD("Start frame: %lld (sample ID %u)", (long long)frame,
               sampleId);
     }
 
@@ -213,22 +215,21 @@ static MP4SampleId calculate_start_sample(Mp4Info& info, float start,
     }
 
     if (pts < 0 || pts > static_cast<int64_t>(info.videoDuration)) {
-      fprintf(stderr, "Error: start PTS %lld is out of range (0-%llu)\n",
+      MP4SEEK_LOGE("Error: start PTS %lld is out of range (0-%llu)",
               (long long)pts, (unsigned long long)info.videoDuration);
       return 0;
     }
 
     if (debug_level > 0) {
-      fprintf(stderr, "Start PTS: %lld\n", (long long)pts);
+      MP4SEEK_LOGD("Start PTS: %lld", (long long)pts);
     }
 
     sampleId = find_sample_at_time(info.hFile, info.videoTrackId,
                                    static_cast<MP4Timestamp>(pts), debug_level);
 
   } else {
-    fprintf(
-        stderr,
-        "Error: one of --start, --start_frame, or --start_pts is required\n");
+    MP4SEEK_LOGE(
+        "Error: one of --start, --start_frame, or --start_pts is required");
     return 0;
   }
 
@@ -292,7 +293,7 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     const char* sampleEntry = use_hev1 ? "hev1" : "hvc1";
 
     if (debug_level > 0) {
-      fprintf(stderr, "Detected HEVC video track with %s sample entry\n",
+      MP4SEEK_LOGD("Detected HEVC video track with %s sample entry",
               sampleEntry);
     }
 
@@ -421,7 +422,7 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
   } else {
     // H.264 or other video track
     if (debug_level > 0) {
-      fprintf(stderr, "Detected H.264/AVC video track\n");
+      MP4SEEK_LOGD("Detected H.264/AVC video track");
     }
 
     // Get codec configuration
@@ -451,7 +452,7 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
   }
 
   if (dstTrackId == MP4_INVALID_TRACK_ID) {
-    fprintf(stderr, "Error: could not create video track\n");
+    MP4SEEK_LOGE("Error: could not create video track");
     return MP4_INVALID_TRACK_ID;
   }
 
@@ -468,7 +469,7 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
         MP4ReadSample(srcFile, srcTrackId, s, &pBytes, &numBytes, nullptr,
                       &duration, &renderingOffset, &isSyncSample);
     if (!success || pBytes == nullptr) {
-      fprintf(stderr, "Error: could not read video sample %u\n", s);
+      MP4SEEK_LOGE("Error: could not read video sample %u", s);
       return MP4_INVALID_TRACK_ID;
     }
 
@@ -477,7 +478,7 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     free(pBytes);
 
     if (!success) {
-      fprintf(stderr, "Error: could not write video sample %u\n", s);
+      MP4SEEK_LOGE("Error: could not write video sample %u", s);
       return MP4_INVALID_TRACK_ID;
     }
 
@@ -485,7 +486,7 @@ static MP4TrackId copy_video_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
   }
 
   if (debug_level > 0) {
-    fprintf(stderr, "Copied %u video samples (from %u to %u)\n", copiedSamples,
+    MP4SEEK_LOGD("Copied %u video samples (from %u to %u)", copiedSamples,
             startSample, totalSamples);
   }
 
@@ -511,8 +512,8 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
   }
 
   if (debug_level > 0) {
-    fprintf(stderr,
-            "Audio cut time: %llu (audio timescale), starting at sample %u\n",
+    MP4SEEK_LOGD(
+            "Audio cut time: %llu (audio timescale), starting at sample %u",
             (unsigned long long)audioCutTime, startSample);
   }
 
@@ -524,7 +525,7 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
       dstFile, audioTimescale, sampleDuration, MP4_MPEG4_AUDIO_TYPE);
 
   if (dstTrackId == MP4_INVALID_TRACK_ID) {
-    fprintf(stderr, "Error: could not create audio track\n");
+    MP4SEEK_LOGE("Error: could not create audio track");
     return MP4_INVALID_TRACK_ID;
   }
 
@@ -556,7 +557,7 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     bool success = MP4ReadSample(srcFile, srcTrackId, s, &pBytes, &numBytes,
                                  nullptr, &duration, nullptr, nullptr);
     if (!success || pBytes == nullptr) {
-      fprintf(stderr, "Error: could not read audio sample %u\n", s);
+      MP4SEEK_LOGE("Error: could not read audio sample %u", s);
       return MP4_INVALID_TRACK_ID;
     }
 
@@ -566,7 +567,7 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
     free(pBytes);
 
     if (!success) {
-      fprintf(stderr, "Error: could not write audio sample %u\n", s);
+      MP4SEEK_LOGE("Error: could not write audio sample %u", s);
       return MP4_INVALID_TRACK_ID;
     }
 
@@ -574,7 +575,7 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
   }
 
   if (debug_level > 0) {
-    fprintf(stderr, "Copied %u audio samples (from %u to %u)\n", copiedSamples,
+    MP4SEEK_LOGD("Copied %u audio samples (from %u to %u)", copiedSamples,
             startSample, totalSamples);
   }
 
@@ -588,7 +589,7 @@ static MP4TrackId copy_audio_track(MP4FileHandle srcFile, MP4TrackId srcTrackId,
                     totalDuration - skipDuration, false);
 
     if (debug_level > 0) {
-      fprintf(stderr, "Audio EDTS: media_time=%llu, duration=%llu\n",
+      MP4SEEK_LOGD("Audio EDTS: media_time=%llu, duration=%llu",
               (unsigned long long)skipDuration,
               (unsigned long long)(totalDuration - skipDuration));
     }
@@ -622,7 +623,7 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
   // 4. Create output file
   MP4FileHandle outFile = MP4Create(outfile);
   if (outFile == MP4_INVALID_FILE_HANDLE) {
-    fprintf(stderr, "Error: cannot create output file: %s\n", outfile);
+    MP4SEEK_LOGE("Error: cannot create output file: %s", outfile);
     MP4Close(info.hFile);
     return 1;
   }
@@ -673,7 +674,7 @@ int mp4seek(const char* infile, const char* outfile, int debug_level,
         uint32_t outTimescale =
             MP4GetTrackTimeScale(checkFile, checkVideoTrack);
         uint64_t outDurationMs = (outDuration * 1000) / outTimescale;
-        fprintf(stderr, "Wrote %s (%llu ms, %u frames)\n", outfile,
+        MP4SEEK_LOGI("Wrote %s (%llu ms, %u frames)", outfile,
                 (unsigned long long)outDurationMs, outSamples);
       }
       MP4Close(checkFile);

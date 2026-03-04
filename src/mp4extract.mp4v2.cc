@@ -7,12 +7,14 @@
 #include <cstring>
 #include <new>
 
+#include "include/mp4seek_log.h"
+
 int mp4extractframes(const char* infile, int track_num, int start_frame,
                      int end_frame, Mp4Frame** out_frames,
                      int* out_frame_count) {
   // Validate output parameters
   if (out_frames == nullptr || out_frame_count == nullptr) {
-    fprintf(stderr, "Error: output parameters cannot be null\n");
+    MP4SEEK_LOGE("Error: output parameters cannot be null");
     return 1;
   }
 
@@ -22,7 +24,7 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
   // Open input file
   MP4FileHandle hFile = MP4Read(infile);
   if (hFile == MP4_INVALID_FILE_HANDLE) {
-    fprintf(stderr, "Error: cannot open input file: %s\n", infile);
+    MP4SEEK_LOGE("Error: cannot open input file: %s", infile);
     return 1;
   }
 
@@ -30,14 +32,14 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
   // mp4v2 uses MP4FindTrackId with 0-based index to get track ID
   MP4TrackId trackId = MP4FindTrackId(hFile, track_num - 1);
   if (trackId == MP4_INVALID_TRACK_ID) {
-    fprintf(stderr, "Error: track %d not found\n", track_num);
+    MP4SEEK_LOGE("Error: track %d not found", track_num);
     MP4Close(hFile);
     return 1;
   }
 
   MP4SampleId total_samples = MP4GetTrackNumberOfSamples(hFile, trackId);
   if (total_samples == 0) {
-    fprintf(stderr, "Error: track %d has no samples\n", track_num);
+    MP4SEEK_LOGE("Error: track %d has no samples", track_num);
     MP4Close(hFile);
     return 1;
   }
@@ -51,7 +53,7 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
     end_frame = static_cast<int>(total_samples) - 1;
   }
   if (start_frame > end_frame) {
-    fprintf(stderr, "Error: start_frame (%d) > end_frame (%d)\n", start_frame,
+    MP4SEEK_LOGE("Error: start_frame (%d) > end_frame (%d)", start_frame,
             end_frame);
     MP4Close(hFile);
     return 1;
@@ -62,7 +64,7 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
   // Allocate frame array
   Mp4Frame* frames = new (std::nothrow) Mp4Frame[frame_count];
   if (frames == nullptr) {
-    fprintf(stderr, "Error: failed to allocate frame array\n");
+    MP4SEEK_LOGE("Error: failed to allocate frame array");
     MP4Close(hFile);
     return 1;
   }
@@ -84,7 +86,7 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
     bool success = MP4ReadSample(hFile, trackId, sampleId, &pBytes, &numBytes,
                                  nullptr, nullptr, nullptr, nullptr);
     if (!success || pBytes == nullptr) {
-      fprintf(stderr, "Error: could not read sample %d\n", sampleId);
+      MP4SEEK_LOGE("Error: could not read sample %d", sampleId);
       mp4extractframes_free(frames, frame_count);
       MP4Close(hFile);
       return 1;
@@ -94,7 +96,7 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
     // copy)
     uint8_t* data = new (std::nothrow) uint8_t[numBytes];
     if (data == nullptr) {
-      fprintf(stderr, "Error: failed to allocate frame data for sample %d\n",
+      MP4SEEK_LOGE("Error: failed to allocate frame data for sample %d",
               sampleId);
       free(pBytes);  // mp4v2 uses malloc
       mp4extractframes_free(frames, frame_count);
