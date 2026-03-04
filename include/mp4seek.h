@@ -1,5 +1,4 @@
-#ifndef MP4SEEK_H_
-#define MP4SEEK_H_
+#pragma once
 
 #include <cstdint>
 
@@ -19,5 +18,3 @@
 int mp4seek(const char* infile, const char* outfile, int debug_level,
             float start, int64_t start_frame, int64_t start_pts,
             bool accurate_seek);
-
-#endif  // MP4SEEK_H_

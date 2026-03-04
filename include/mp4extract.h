@@ -1,5 +1,4 @@
-#ifndef MP4EXTRACT_H_
-#define MP4EXTRACT_H_
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -32,5 +31,3 @@ int mp4extractframes(const char* infile, int track_num, int start_frame,
 //   frames: Array of frames to free
 //   frame_count: Number of frames in the array
 void mp4extractframes_free(Mp4Frame* frames, int frame_count);
-
-#endif  // MP4EXTRACT_H_
