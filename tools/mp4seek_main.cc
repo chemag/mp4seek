@@ -6,8 +6,8 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "config.h"
 #include "include/mp4seek.h"
+#include "include/mp4seek_version.h"
 
 // Command line options
 // TODO(chemag): add support for --end, --end_frame, --end_pts
@@ -33,7 +33,7 @@ const ArgOptions DEFAULT_OPTIONS{
 };
 
 void print_usage(const char* program_name) {
-  fprintf(stderr, "%s version %s\n", PROJECT_NAME, PROJECT_VERSION);
+  fprintf(stderr, "%s version %s\n", MP4SEEK_PROJECT_NAME, MP4SEEK_VERSION);
   fprintf(stderr, "usage: %s [options] <infile> <outfile>\n", program_name);
   fprintf(stderr, "where options are:\n");
   fprintf(stderr, "\t-d, --debug:\tIncrease debug verbosity [%i]\n",
@@ -155,7 +155,7 @@ ArgOptions* parse_args(int argc, char** argv) {
 
       case VERSION_OPTION:
       case 'v':
-        fprintf(stderr, "%s version %s\n", PROJECT_NAME, PROJECT_VERSION);
+        fprintf(stderr, "%s version %s\n", MP4SEEK_PROJECT_NAME, MP4SEEK_VERSION);
         exit(0);
 
       case HELP_OPTION:

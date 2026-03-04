@@ -1,0 +1,6 @@
+#pragma once
+
+#define MP4SEEK_VERSION_MAJOR 0
+#define MP4SEEK_VERSION_MINOR 2
+#define MP4SEEK_VERSION "0.2"
+#define MP4SEEK_PROJECT_NAME "mp4seek"
