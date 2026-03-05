@@ -39,6 +39,12 @@ endif()
 set_target_properties(mp4seek_lib PROPERTIES OUTPUT_NAME mp4seek)
 target_include_directories(mp4seek_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+# mp4seek_c library (C wrapper with exception-safe interface)
+add_library(mp4seek_c_lib STATIC src/libmp4seek_c_impl.cc)
+target_link_libraries(mp4seek_c_lib mp4seek_lib)
+target_include_directories(mp4seek_c_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+set_target_properties(mp4seek_c_lib PROPERTIES OUTPUT_NAME mp4seek_c)
+
 # mp4seek executable
 add_executable(mp4seek tools/mp4seek_main.cc)
 target_link_libraries(mp4seek mp4seek_lib)
