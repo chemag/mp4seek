@@ -6,8 +6,8 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "include/mp4seek.h"
-#include "include/mp4seek_version.h"
+#include <mp4seek.h>
+#include <mp4seek_version.h>
 
 // Command line options
 // TODO(chemag): add support for --end, --end_frame, --end_pts

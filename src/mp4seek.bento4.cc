@@ -1,4 +1,4 @@
-#include "include/mp4seek.h"
+#include <mp4seek.h>
 
 #include <climits>
 #include <cmath>
@@ -11,7 +11,7 @@
 #include <string>
 
 #include "Ap4.h"
-#include "include/mp4seek_log.h"
+#include <mp4seek_log.h>
 
 // Parsed MP4 file info
 struct Mp4Info {

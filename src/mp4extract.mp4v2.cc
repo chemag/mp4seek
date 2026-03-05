@@ -1,4 +1,4 @@
-#include "include/mp4extract.h"
+#include <mp4extract.h>
 
 #include <mp4v2/mp4v2.h>
 
@@ -7,7 +7,7 @@
 #include <cstring>
 #include <new>
 
-#include "include/mp4seek_log.h"
+#include <mp4seek_log.h>
 
 int mp4extractframes(const char* infile, int track_num, int start_frame,
                      int end_frame, Mp4Frame** out_frames,
